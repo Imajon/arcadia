@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voronoï Vivant</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:100%; height:100%; overflow:hidden; background:#000; }
+#main { position:fixed; inset:0; }
+#voronoi { position:absolute; inset:0; width:100%; height:100%; }
+#camCanvas { position:absolute; inset:0; opacity:0; pointer-events:none; }
+#ui {
+  position:fixed; bottom:20px; right:20px; z-index:20;
+  display:flex; gap:10px; align-items:center;
+}
+button {
+  background:rgba(255,255,255,0.1); color:#fff;
+  border:1px solid rgba(255,255,255,0.3); border-radius:8px;
+  padding:8px 16px; font-size:13px; font-family:system-ui,sans-serif;
+  cursor:pointer; backdrop-filter:blur(8px); transition:background 0.2s;
+}
+button:hover { background:rgba(255,255,255,0.22); }
+#camStatus {
+  font-size:12px; color:rgba(255,255,255,0.5);
+  font-family:system-ui,sans-serif;
+}
+</style>
+</head>
+<body>
+<div id="main">
+  <canvas id="voronoi"></canvas>
+  <canvas id="camCanvas"></canvas>
+</div>
+<div id="ui">
+  <span id="camStatus">webcam off</span>
+  <button id="btnCam">⬤ Webcam</button>
+  <button id="btnFS">⛶ Plein écran</button>
+</div>
+
+<script>
+(function(){
+
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+const N = 270;          // seeds (×3 again)
+const SPEED = 0.4;
+const SKIP = 3;         // render every N frames
+
+// ─── CANVAS SETUP ─────────────────────────────────────────────────────────────
+const vc = document.getElementById('voronoi');
+const ctx = vc.getContext('2d');
+const cc = document.getElementById('camCanvas');
+const camCtx = cc.getContext('2d', { willReadFrequently: true });
+
+let W, H, seeds;
+let camActive = false;
+let video = null;
+let silhouetteData = null;   // Float32Array W×H, 0..1 presence
+let prevFrame = null;        // for background subtraction
+let bgModel = null;          // accumulated background
+
+// ─── INIT ──────────────────────────────────────────────────────────────────────
+function resize() {
+  W = vc.width = window.innerWidth;
+  H = vc.height = window.innerHeight;
+  cc.width = W; cc.height = H;
+  silhouetteData = new Float32Array(W * H);
+  prevFrame = null; bgModel = null;
+}
+
+function init() {
+  resize();
+  seeds = [];
+  for (let i = 0; i < N; i++) {
+    seeds.push({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      vx: (Math.random()-0.5) * SPEED,
+      vy: (Math.random()-0.5) * SPEED,
+      h: Math.random() * 360,
+      dh: (Math.random()-0.5) * 0.25,
+      // base position (drifts slowly)
+      bx: Math.random() * W,
+      by: Math.random() * H,
+    });
+  }
+}
+
+window.addEventListener('resize', () => { resize(); });
+
+// ─── DELAUNAY / VORONOI ────────────────────────────────────────────────────────
+function circumcircle(ax,ay,bx,by,cx,cy) {
+  const D = 2*(ax*(by-cy)+bx*(cy-ay)+cx*(ay-by));
+  if (Math.abs(D) < 1e-10) return null;
+  const a2=ax*ax+ay*ay, b2=bx*bx+by*by, c2=cx*cx+cy*cy;
+  const ux=(a2*(by-cy)+b2*(cy-ay)+c2*(ay-by))/D;
+  const uy=(a2*(cx-bx)+b2*(ax-cx)+c2*(bx-ax))/D;
+  return { x:ux, y:uy, r2:(ax-ux)*(ax-ux)+(ay-uy)*(ay-uy) };
+}
+
+function edgeKey(x1,y1,x2,y2) {
+  const r=v=>Math.round(v*10);
+  const [ax,ay,bx,by] = r(x1)<r(x2)||(r(x1)===r(x2)&&r(y1)<r(y2))
+    ? [r(x1),r(y1),r(x2),r(y2)] : [r(x2),r(y2),r(x1),r(y1)];
+  return `${ax},${ay},${bx},${by}`;
+}
+
+function bowyerWatson(pts) {
+  const M = Math.max(W,H)*12;
+  // Pre-cache circumcircles to avoid recomputing
+  const triCC = [];
+  let tris = [{ax:-M,ay:-M, bx:M*3,by:-M, cx:0,cy:M*3}];
+  triCC.push(circumcircle(-M,-M,M*3,-M,0,M*3));
+
+  // Sort points by x for better cache locality
+  const sorted = pts.slice().sort((a,b)=>a.x-b.x);
+
+  for (const p of sorted) {
+    const bad=[], badIdx=new Set();
+    for (let i=0;i<tris.length;i++) {
+      const c=triCC[i];
+      if (!c) continue;
+      const dx=p.x-c.x, dy=p.y-c.y;
+      if (dx*dx+dy*dy < c.r2) { bad.push(i); badIdx.add(i); }
+    }
+
+    // Build boundary polygon using edge counting
+    const edgeCnt=new Map();
+    for (const i of bad) {
+      const t=tris[i];
+      const es=[[t.ax,t.ay,t.bx,t.by],[t.bx,t.by,t.cx,t.cy],[t.cx,t.cy,t.ax,t.ay]];
+      for (const e of es) {
+        const k=edgeKey(e[0],e[1],e[2],e[3]);
+        if (!edgeCnt.has(k)) edgeCnt.set(k,{e,cnt:0});
+        edgeCnt.get(k).cnt++;
+      }
+    }
+
+    // Remove bad triangles (back to front to preserve indices)
+    const newTris=[], newCC=[];
+    for (let i=0;i<tris.length;i++) {
+      if (!badIdx.has(i)){ newTris.push(tris[i]); newCC.push(triCC[i]); }
+    }
+
+    // Add new triangles from boundary edges
+    for (const {e,cnt} of edgeCnt.values()) {
+      if (cnt===1) {
+        const nt={ax:e[0],ay:e[1],bx:e[2],by:e[3],cx:p.x,cy:p.y};
+        newTris.push(nt);
+        newCC.push(circumcircle(nt.ax,nt.ay,nt.bx,nt.by,nt.cx,nt.cy));
+      }
+    }
+
+    tris=newTris; triCC.length=0; for(const c of newCC) triCC.push(c);
+  }
+
+  const SM=Math.max(W,H)*6;
+  const out=[], outCC=[];
+  for(let i=0;i<tris.length;i++){
+    const t=tris[i];
+    if(!(Math.abs(t.ax)>SM||Math.abs(t.ay)>SM||Math.abs(t.bx)>SM||Math.abs(t.by)>SM||
+         Math.abs(t.cx)>SM||Math.abs(t.cy)>SM)){
+      out.push(t); outCC.push(triCC[i]);
+    }
+  }
+  return { tris:out, ccArr:outCC };
+}
+
+function buildVoronoi({tris, ccArr}) {
+  const eMap = new Map();
+  for (let i=0;i<tris.length;i++) {
+    const t=tris[i];
+    const es=[[t.ax,t.ay,t.bx,t.by],[t.bx,t.by,t.cx,t.cy],[t.cx,t.cy,t.ax,t.ay]];
+    for (const e of es) {
+      const k=edgeKey(e[0],e[1],e[2],e[3]);
+      if (!eMap.has(k)) eMap.set(k,[]);
+      eMap.get(k).push(i);
+    }
+  }
+  const edges=[], vMap=new Map();
+  for (const [,ts] of eMap) {
+    if (ts.length!==2) continue;
+    const c1=ccArr[ts[0]], c2=ccArr[ts[1]];
+    if (!c1||!c2) continue;
+    const pad=100;
+    if (c1.x<-pad||c1.x>W+pad||c1.y<-pad||c1.y>H+pad) continue;
+    if (c2.x<-pad||c2.x>W+pad||c2.y<-pad||c2.y>H+pad) continue;
+    edges.push([c1.x,c1.y,c2.x,c2.y]);
+    const k1=`${Math.round(c1.x)},${Math.round(c1.y)}`;
+    const k2=`${Math.round(c2.x)},${Math.round(c2.y)}`;
+    if (!vMap.has(k1)) vMap.set(k1,{x:c1.x,y:c1.y});
+    if (!vMap.has(k2)) vMap.set(k2,{x:c2.x,y:c2.y});
+  }
+  return { edges, vertices:[...vMap.values()] };
+}
+
+// ─── SILHOUETTE SAMPLING ────────────────────────────────────────────────────────
+// Returns presence [0..1] at pixel (px,py) from silhouetteData
+function presence(px,py) {
+  if (!silhouetteData) return 0;
+  const ix = Math.max(0,Math.min(W-1,px|0));
+  const iy = Math.max(0,Math.min(H-1,py|0));
+  return silhouetteData[iy*W+ix];
+}
+
+// Sample a region around point, return average presence
+function regionPresence(px,py,r) {
+  if (!camActive) return 0;
+  let sum=0, n=0;
+  const step = Math.max(1, r/4|0);
+  for (let dy=-r;dy<=r;dy+=step) {
+    for (let dx=-r;dx<=r;dx+=step) {
+      sum += presence(px+dx, py+dy);
+      n++;
+    }
+  }
+  return n>0 ? sum/n : 0;
+}
+
+// ─── WEBCAM ────────────────────────────────────────────────────────────────────
+function startWebcam() {
+  if (video) return;
+  video = document.createElement('video');
+  video.autoplay = true; video.muted = true; video.playsInline = true;
+  navigator.mediaDevices.getUserMedia({ video: { width:320, height:240 }, audio:false })
+    .then(stream => {
+      video.srcObject = stream;
+      video.play();
+      camActive = true;
+      document.getElementById('camStatus').textContent = '● webcam on';
+      document.getElementById('camStatus').style.color = 'rgba(100,255,150,0.7)';
+    })
+    .catch(e => {
+      console.warn('webcam:', e);
+      document.getElementById('camStatus').textContent = 'cam denied';
+      video = null;
+    });
+}
+
+function stopWebcam() {
+  if (!video) return;
+  const stream = video.srcObject;
+  if (stream) stream.getTracks().forEach(t=>t.stop());
+  video = null; camActive = false;
+  if (silhouetteData) silhouetteData.fill(0);
+  document.getElementById('camStatus').textContent = 'webcam off';
+  document.getElementById('camStatus').style.color = 'rgba(255,255,255,0.5)';
+}
+
+// Process webcam frame into silhouette (background subtraction + blur)
+function processCam() {
+  if (!video || !camActive || video.readyState < 2) return;
+
+  const VW = video.videoWidth || 320;
+  const VH = video.videoHeight || 240;
+
+  // Draw mirrored video to small offscreen
+  camCtx.save();
+  camCtx.scale(-1,1);
+  camCtx.drawImage(video, -VW,0, VW,VH);
+  camCtx.restore();
+
+  const raw = camCtx.getImageData(0,0,VW,VH).data;
+  const size = VW*VH;
+
+  // Init background model
+  if (!bgModel || bgModel.length !== size*3) {
+    bgModel = new Float32Array(size*3);
+    for (let i=0;i<size;i++) {
+      bgModel[i*3]   = raw[i*4];
+      bgModel[i*3+1] = raw[i*4+1];
+      bgModel[i*3+2] = raw[i*4+2];
+    }
+    return;
+  }
+
+  // Compute diff mask
+  const mask = new Float32Array(size);
+  for (let i=0;i<size;i++) {
+    const dr = raw[i*4]   - bgModel[i*3];
+    const dg = raw[i*4+1] - bgModel[i*3+1];
+    const db = raw[i*4+2] - bgModel[i*3+2];
+    const diff = Math.sqrt(dr*dr+dg*dg+db*db)/441; // normalize 0..1
+    mask[i] = diff > 0.12 ? Math.min(1, (diff-0.12)*5) : 0;
+    // Slow background update where no motion
+    if (mask[i] < 0.1) {
+      bgModel[i*3]   += (raw[i*4]   - bgModel[i*3])   * 0.02;
+      bgModel[i*3+1] += (raw[i*4+1] - bgModel[i*3+1]) * 0.02;
+      bgModel[i*3+2] += (raw[i*4+2] - bgModel[i*3+2]) * 0.02;
+    }
+  }
+
+  // Scale mask up to screen size with bilinear approx
+  const scaleX = W/VW, scaleY = H/VH;
+  for (let sy=0;sy<H;sy++) {
+    for (let sx=0;sx<W;sx++) {
+      const vx = Math.min(VW-1, (sx/scaleX)|0);
+      const vy = Math.min(VH-1, (sy/scaleY)|0);
+      silhouetteData[sy*W+sx] = mask[vy*VW+vx];
+    }
+  }
+}
+
+// Max displacement from anchor (keeps density intact)
+const MAX_DISP = 60; // px — seeds can't wander more than this from their anchor
+const MAX_SPEED = 1.8;
+
+// ─── UPDATE ────────────────────────────────────────────────────────────────────
+function update() {
+  for (let k=0;k<N;k++) {
+    const s=seeds[k];
+
+    // Slow ambient drift of anchor position
+    s.bx += s.vx * 0.3;
+    s.by += s.vy * 0.3;
+    if (s.bx<0){s.bx=0;s.vx*=-1;}
+    if (s.bx>W){s.bx=W;s.vx*=-1;}
+    if (s.by<0){s.by=0;s.vy*=-1;}
+    if (s.by>H){s.by=H;s.vy*=-1;}
+
+    // Check silhouette near current seed position
+    const pres = regionPresence(s.x, s.y, 30);
+
+    // Compute local silhouette gradient (which direction to push)
+    let gx=0, gy=0;
+    if (pres > 0.05 && camActive) {
+      const R=20;
+      gx = regionPresence(s.x+R,s.y,10) - regionPresence(s.x-R,s.y,10);
+      gy = regionPresence(s.x,s.y+R,10) - regionPresence(s.x,s.y-R,10);
+      const glen = Math.sqrt(gx*gx+gy*gy)+0.001;
+      gx/=glen; gy/=glen;
+    }
+
+    // Silhouette push (limited force)
+    const pushStrength = pres * 1.2;
+    let tx = s.bx + gx * MAX_DISP * pres;
+    let ty = s.by + gy * MAX_DISP * pres;
+
+    // Clamp target to max displacement from anchor
+    const ddx = tx - s.bx, ddy = ty - s.by;
+    const dd = Math.sqrt(ddx*ddx+ddy*ddy);
+    if (dd > MAX_DISP) { tx = s.bx + ddx/dd*MAX_DISP; ty = s.by + ddy/dd*MAX_DISP; }
+
+    // Spring force toward target
+    const springK = 0.08;
+    s.ox = (s.ox||s.bx); s.oy = (s.oy||s.by);
+    s.ox += (tx - s.ox) * springK;
+    s.oy += (ty - s.oy) * springK;
+
+    // Actual position = anchor + spring offset, clamped by MAX_DISP
+    const offx = s.ox - s.bx, offy = s.oy - s.by;
+    const offD = Math.sqrt(offx*offx+offy*offy);
+    const clampedOff = Math.min(offD, MAX_DISP);
+    const nx = offD>0 ? s.bx + offx/offD*clampedOff : s.bx;
+    const ny = offD>0 ? s.by + offy/offD*clampedOff : s.by;
+    s.x = Math.max(0, Math.min(W, nx));
+    s.y = Math.max(0, Math.min(H, ny));
+
+    // Hue drift (faster in silhouette)
+    s.h = (s.h + s.dh + pres * 2.5 + 360) % 360;
+  }
+}
+
+// ─── DRAW ──────────────────────────────────────────────────────────────────────
+function nearestHue(x,y) {
+  let minD=1e18, best=0;
+  for (let k=0;k<N;k++){
+    const dx=x-seeds[k].x, dy=y-seeds[k].y;
+    const d=dx*dx+dy*dy;
+    if (d<minD){minD=d;best=k;}
+  }
+  return seeds[best].h;
+}
+
+function draw() {
+  ctx.clearRect(0,0,W,H);
+
+  const delaunay = bowyerWatson(seeds);
+  const {edges, vertices} = buildVoronoi(delaunay);
+
+  // Draw edges
+  for (const [x1,y1,x2,y2] of edges) {
+    const mx=(x1+x2)/2, my=(y1+y2)/2;
+    const hue = nearestHue(mx,my);
+    const pres = regionPresence(mx,my,16);
+    // line width: base 0.7, max ×3 = 2.1
+    const lw = 0.7 + pres * 1.4;
+    const alpha = 0.42 + pres * 0.45;
+    const lum  = 52 + pres * 28;
+    ctx.strokeStyle = `hsla(${hue|0},65%,${lum|0}%,${alpha.toFixed(2)})`;
+    ctx.lineWidth = lw;
+    ctx.beginPath();
+    ctx.moveTo(x1,y1);
+    ctx.lineTo(x2,y2);
+    ctx.stroke();
+  }
+
+  // Draw only true Voronoi vertices (intersections)
+  for (const v of vertices) {
+    if (v.x<-5||v.x>W+5||v.y<-5||v.y>H+5) continue;
+    const hue = nearestHue(v.x,v.y);
+    const pres = regionPresence(v.x,v.y,12);
+    // radius: base 1.5, max ×3 = 4.5
+    const r = 1.5 + pres * 3.0;
+    const alpha = 0.72 + pres * 0.28;
+    const lum  = 68 + pres * 22;
+    ctx.beginPath();
+    ctx.arc(v.x,v.y,r,0,Math.PI*2);
+    ctx.fillStyle = `hsla(${hue|0},80%,${lum|0}%,${alpha.toFixed(2)})`;
+    ctx.fill();
+  }
+}
+
+// ─── LOOP ──────────────────────────────────────────────────────────────────────
+let frame=0;
+function loop() {
+  frame++;
+  if (frame%3===0) processCam();
+  update();
+  if (frame%SKIP===0) draw();
+  requestAnimationFrame(loop);
+}
+
+// ─── CONTROLS ──────────────────────────────────────────────────────────────────
+document.getElementById('btnCam').addEventListener('click',()=>{
+  if (camActive) stopWebcam(); else startWebcam();
+});
+
+document.getElementById('btnFS').addEventListener('click',()=>{
+  if (!document.fullscreenElement)
+    document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen();
+  else document.exitFullscreen&&document.exitFullscreen();
+});
+
+window.addEventListener('resize', resize);
+
+// ─── START ─────────────────────────────────────────────────────────────────────
+init();
+requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>

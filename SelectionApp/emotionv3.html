@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ÉMOTION · NATURE</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@300;400;500&display=swap');
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#080810;font-family:'Inter',sans-serif;color:#e0e0ee}
+#c{position:fixed;inset:0;width:100%;height:100%}
+#video{position:fixed;top:-9999px;left:-9999px;width:1px;height:1px}
+
+/* Layout overlay */
+#ui{position:fixed;inset:0;pointer-events:none;display:grid;grid-template-rows:52px 1fr 56px;grid-template-columns:200px 1fr 200px}
+
+/* Header */
+header{grid-column:1/-1;grid-row:1;pointer-events:all;
+  display:flex;align-items:center;justify-content:space-between;padding:0 24px;
+  border-bottom:1px solid rgba(255,255,255,0.06);background:rgba(8,8,16,0.75);backdrop-filter:blur(16px)}
+.logo{font-family:'Space Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.2em;color:rgba(224,224,238,.5)}
+.logo b{color:#e0e0ee}
+#hdr-pill{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.1em;
+  padding:4px 14px;border-radius:99px;border:1px solid rgba(255,255,255,.1);
+  background:rgba(255,255,255,.04);color:rgba(224,224,238,.4);transition:color .5s,border-color .5s}
+#hdr-fps{font-family:'Space Mono',monospace;font-size:10px;color:rgba(224,224,238,.25)}
+
+/* Side panels */
+aside{display:flex;flex-direction:column;gap:0;
+  border-right:1px solid rgba(255,255,255,.06);background:rgba(8,8,16,.7);backdrop-filter:blur(16px);
+  padding:20px 16px;overflow:hidden}
+aside.right{border-right:none;border-left:1px solid rgba(255,255,255,.06)}
+.pnl-label{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:.25em;color:rgba(224,224,238,.3);
+  text-transform:uppercase;padding-bottom:12px;border-bottom:1px solid rgba(255,255,255,.05);margin-bottom:14px}
+
+/* Emotion rows */
+.e-row{padding:10px 8px;border-radius:6px;border:1px solid transparent;margin-bottom:6px;transition:all .4s}
+.e-row.active{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.1)}
+.e-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.e-name{font-size:12px;font-weight:500;display:flex;align-items:center;gap:7px}
+.e-bullet{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.e-pct{font-family:'Space Mono',monospace;font-size:10px;color:rgba(224,224,238,.4);transition:color .3s}
+.e-track{height:1.5px;background:rgba(255,255,255,.06);border-radius:1px;overflow:hidden}
+.e-fill{height:100%;border-radius:1px;transition:width .35s}
+.e-sub{font-size:10px;color:rgba(224,224,238,.3);margin-top:5px;line-height:1.6}
+
+/* Effects list */
+.eff{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:10px;color:rgba(224,224,238,.3);transition:color .4s}
+.eff.on{color:rgba(224,224,238,.8)}
+.eff-dot{width:4px;height:4px;border-radius:50%;background:rgba(255,255,255,.15);flex-shrink:0;transition:background .4s}
+.eff.on .eff-dot{background:currentColor}
+
+/* Center */
+#center{grid-column:2;grid-row:2;position:relative}
+
+/* Start overlay */
+#start{position:absolute;inset:0;z-index:20;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:18px;background:rgba(8,8,16,.95);pointer-events:all}
+.s-ring{width:64px;height:64px;border-radius:50%;border:1px solid rgba(255,255,255,.15);
+  display:flex;align-items:center;justify-content:center;font-size:22px;color:rgba(255,255,255,.6)}
+.s-title{font-family:'Space Mono',monospace;font-size:13px;font-weight:700;letter-spacing:.15em}
+.s-sub{font-size:11px;color:rgba(224,224,238,.4);text-align:center;line-height:1.8;max-width:240px}
+#btn-start{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.12em;padding:11px 28px;
+  border-radius:5px;background:#e0e0ee;color:#080810;border:none;cursor:pointer;transition:opacity .2s}
+#btn-start:hover{opacity:.82}
+#ldr{width:200px;height:1.5px;background:rgba(255,255,255,.08);border-radius:1px;overflow:hidden;display:none}
+#ldr-fill{height:100%;width:0%;background:#e0e0ee;transition:width .25s}
+
+/* Face frame — pure CSS, positioned by JS */
+#ff{position:fixed;display:none;pointer-events:none;z-index:10}
+.cc{position:absolute;width:14px;height:14px;border-style:solid;transition:border-color .4s}
+.cc.tl{top:0;left:0;border-width:1.5px 0 0 1.5px;border-top-left-radius:2px}
+.cc.tr{top:0;right:0;border-width:1.5px 1.5px 0 0;border-top-right-radius:2px}
+.cc.bl{bottom:0;left:0;border-width:0 0 1.5px 1.5px;border-bottom-left-radius:2px}
+.cc.br{bottom:0;right:0;border-width:0 1.5px 1.5px 0;border-bottom-right-radius:2px}
+#ff-tag{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);
+  font-family:'Space Mono',monospace;font-size:10px;letter-spacing:.08em;white-space:nowrap;
+  background:rgba(8,8,16,.9);border:1px solid rgba(255,255,255,.15);padding:4px 12px;border-radius:3px;
+  transition:border-color .4s}
+#ff-tag .emo{font-weight:700}
+#ff-tag .pct{color:rgba(224,224,238,.45);margin-left:5px}
+
+/* Footer */
+footer{grid-column:1/-1;grid-row:3;display:flex;align-items:center;justify-content:center;gap:36px;
+  border-top:1px solid rgba(255,255,255,.06);background:rgba(8,8,16,.75);backdrop-filter:blur(16px)}
+.f-item{font-family:'Space Mono',monospace;font-size:8px;letter-spacing:.18em;
+  color:rgba(224,224,238,.3);text-transform:uppercase;display:flex;align-items:center;gap:7px}
+.f-dot{width:5px;height:5px;border-radius:50%}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="ui">
+  <header>
+    <div class="logo">ÉMOTION · <b>NATURE</b></div>
+    <div id="hdr-pill">EN ATTENTE</div>
+    <div id="hdr-fps">– FPS</div>
+  </header>
+
+  <aside style="grid-column:1;grid-row:2">
+    <div class="pnl-label">Détection</div>
+    <div class="e-row" id="r-happy">
+      <div class="e-hd">
+        <div class="e-name"><div class="e-bullet" style="background:#4ade80"></div>Content</div>
+        <div class="e-pct" id="p-happy">0%</div>
+      </div>
+      <div class="e-track"><div class="e-fill" id="b-happy" style="background:#4ade80"></div></div>
+      <div class="e-sub">Orbes dorées · Lignes florissantes · Pulsation chaude</div>
+    </div>
+    <div class="e-row" id="r-neutral">
+      <div class="e-hd">
+        <div class="e-name"><div class="e-bullet" style="background:#94a3b8"></div>Neutre</div>
+        <div class="e-pct" id="p-neutral">0%</div>
+      </div>
+      <div class="e-track"><div class="e-fill" id="b-neutral" style="background:#94a3b8"></div></div>
+      <div class="e-sub">Grille calme · Ondes douces · Géométrie stable</div>
+    </div>
+    <div class="e-row" id="r-angry">
+      <div class="e-hd">
+        <div class="e-name"><div class="e-bullet" style="background:#f87171"></div>Fâché</div>
+        <div class="e-pct" id="p-angry">0%</div>
+      </div>
+      <div class="e-track"><div class="e-fill" id="b-angry" style="background:#f87171"></div></div>
+      <div class="e-sub">Éclats rouges · Fractures · Turbulences</div>
+    </div>
+    <div class="e-row" id="r-surprised">
+      <div class="e-hd">
+        <div class="e-name"><div class="e-bullet" style="background:#fb923c"></div>Surpris</div>
+        <div class="e-pct" id="p-surprised">0%</div>
+      </div>
+      <div class="e-track"><div class="e-fill" id="b-surprised" style="background:#fb923c"></div></div>
+      <div class="e-sub">Explosion radiale · Particules vives · Ondes d'impact</div>
+    </div>
+  </aside>
+
+  <div id="center">
+    <div id="start">
+      <div class="s-ring">◎</div>
+      <div class="s-title">ÉMOTION · NATURE</div>
+      <div class="s-sub">Tes émotions façonnent un monde abstrait en temps réel.</div>
+      <button id="btn-start">Activer la caméra</button>
+      <div id="ldr"><div id="ldr-fill"></div></div>
+    </div>
+  </div>
+
+  <aside class="right" style="grid-column:3;grid-row:2">
+    <div class="pnl-label">Effets actifs</div>
+    <div class="eff" id="ef-orbs"><div class="eff-dot"></div>Orbes</div>
+    <div class="eff" id="ef-lines"><div class="eff-dot"></div>Lignes organiques</div>
+    <div class="eff" id="ef-particles"><div class="eff-dot"></div>Particules</div>
+    <div class="eff" id="ef-rings"><div class="eff-dot"></div>Anneaux</div>
+    <div class="eff" id="ef-shards"><div class="eff-dot"></div>Fragments</div>
+    <div class="eff" id="ef-burst"><div class="eff-dot"></div>Explosion radiale</div>
+    <div class="eff" id="ef-grid"><div class="eff-dot"></div>Grille réactive</div>
+    <div class="eff" id="ef-turbulence"><div class="eff-dot"></div>Turbulences</div>
+  </aside>
+
+  <footer>
+    <div class="f-item"><div class="f-dot" style="background:#4ade80"></div>Content</div>
+    <div class="f-item"><div class="f-dot" style="background:#94a3b8"></div>Neutre</div>
+    <div class="f-item"><div class="f-dot" style="background:#f87171"></div>Fâché</div>
+    <div class="f-item"><div class="f-dot" style="background:#fb923c"></div>Surpris</div>
+    <div class="f-item" style="color:rgba(224,224,238,.18)">↔ Déplace-toi pour modifier le graphisme</div>
+  </footer>
+</div>
+
+<!-- Face frame (outside #ui so it can be fixed-positioned) -->
+<div id="ff">
+  <div class="cc tl"></div><div class="cc tr"></div>
+  <div class="cc bl"></div><div class="cc br"></div>
+  <div id="ff-tag"><span class="emo" id="tag-emo">—</span><span class="pct" id="tag-pct"></span></div>
+</div>
+
+<video id="video" autoplay muted playsinline></video>
+
+<script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/face-api.js"></script>
+<script>
+// ─── CANVAS SETUP ───────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W = 0, H = 0;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ─── EMOTIONS (smoothed) ────────────────────────────────────────────────────
+const E = { happy:0, neutral:1, angry:0, surprised:0 };
+const T = { happy:0, neutral:1, angry:0, surprised:0 }; // targets
+const ALPHA = 0.06; // smoothing
+
+// Face box in screen coordinates
+let faceRect = null; // {x,y,w,h} screen px
+
+// ─── UTILS ──────────────────────────────────────────────────────────────────
+const lerp = (a,b,t) => a+(b-a)*t;
+const clamp = (v,mn,mx) => Math.max(mn,Math.min(mx,v));
+const rand = (mn,mx) => mn+Math.random()*(mx-mn);
+
+// ─── SCENE OBJECTS ──────────────────────────────────────────────────────────
+// All positions are 0-1 relative to the face box (or full canvas if no face)
+
+// Orbs
+const orbs = Array.from({length:12}, (_,i) => ({
+  x: rand(0.1,0.9), y: rand(0.1,0.9),
+  vx: rand(-.003,.003), vy: rand(-.003,.003),
+  base: rand(0.04,0.1),
+  phase: rand(0,Math.PI*2), speed: rand(.008,.02),
+  hue: rand(60,120),
+}));
+
+// Organic lines
+const lineSeeds = Array.from({length:8}, (_,i) => ({
+  phase: (i/8)*Math.PI*2, speed: rand(.005,.015),
+  amp: rand(.08,.2), freq: rand(2,5),
+}));
+
+// Particles (pooled)
+const MAX_P = 300;
+const particles = [];
+for (let i=0;i<MAX_P;i++) particles.push({ active:false, x:0,y:0,vx:0,vy:0,life:0,maxLife:1,size:0,hue:0,alpha:0 });
+
+function spawnParticle(cx,cy,type) {
+  const p = particles.find(p=>!p.active);
+  if (!p) return;
+  p.active = true; p.x=cx; p.y=cy;
+  if (type==='happy') {
+    const a = rand(0,Math.PI*2), spd = rand(.003,.009);
+    p.vx=Math.cos(a)*spd; p.vy=Math.sin(a)*spd;
+    p.life=1; p.maxLife=1; p.size=rand(.005,.014); p.hue=rand(40,130); p.alpha=1;
+  } else if (type==='angry') {
+    p.vx=rand(-.008,.008); p.vy=rand(-.014,-.002);
+    p.life=1; p.maxLife=1; p.size=rand(.006,.016); p.hue=rand(0,30); p.alpha=1;
+  } else if (type==='surprised') {
+    const a = rand(0,Math.PI*2), spd = rand(.01,.025);
+    p.vx=Math.cos(a)*spd; p.vy=Math.sin(a)*spd;
+    p.life=1; p.maxLife=1; p.size=rand(.003,.01); p.hue=rand(20,60); p.alpha=1;
+  } else { // neutral
+    p.vx=rand(-.002,.002); p.vy=rand(-.004,-.001);
+    p.life=1; p.maxLife=1; p.size=rand(.003,.008); p.hue=rand(200,240); p.alpha=1;
+  }
+}
+
+// Shards for angry
+const shards = Array.from({length:20}, () => ({
+  x: rand(.1,.9), y: rand(.1,.9),
+  vx: rand(-.008,.008), vy: rand(-.008,.008),
+  size: rand(.03,.09), angle: rand(0,Math.PI*2), rotSpeed: rand(-.04,.04),
+  life: rand(0,1), decay: rand(.004,.012),
+}));
+
+// Rings for surprised
+const rings = Array.from({length:6}, (_,i) => ({
+  phase: (i/6)*Math.PI*2, speed: rand(.01,.025),
+  r: 0, targetR: rand(.1,.35), decay: rand(.005,.012),
+  active: false,
+}));
+
+let ringTrigger = 0;
+
+// Noise grid
+let t = 0;
+
+// ─── DRAW ───────────────────────────────────────────────────────────────────
+let lastT = 0, fps = 0, fCount = 0, fTime = 0;
+
+function draw(ts) {
+  requestAnimationFrame(draw);
+  const dt = ts - lastT; lastT = ts;
+  fTime += dt; fCount++;
+  if (fTime > 1000) { fps = fCount; fCount = 0; fTime = 0; document.getElementById('hdr-fps').textContent = fps+' FPS'; }
+
+  // Smooth emotions
+  E.happy    = lerp(E.happy,    T.happy,    ALPHA);
+  E.neutral  = lerp(E.neutral,  T.neutral,  ALPHA);
+  E.angry    = lerp(E.angry,    T.angry,    ALPHA);
+  E.surprised= lerp(E.surprised,T.surprised,ALPHA);
+
+  t += 0.012;
+
+  const bx = faceRect; // may be null
+
+  // ── Background ──────────────────────────────────────────────────────────
+  // Full-canvas bg
+  ctx.fillStyle = '#080810';
+  ctx.fillRect(0, 0, W, H);
+
+  // Subtle dot grid on full canvas
+  {
+    const step = 36;
+    ctx.fillStyle = 'rgba(255,255,255,0.028)';
+    for (let x=step;x<W;x+=step)
+      for (let y=step;y<H;y+=step) {
+        ctx.beginPath(); ctx.arc(x,y,.7,0,Math.PI*2); ctx.fill();
+      }
+  }
+
+  if (!bx) {
+    // No face — gentle idle animation on full canvas
+    idleAnimation();
+    updateUI();
+    return;
+  }
+
+  // ── Clip to face box ────────────────────────────────────────────────────
+  const { x: BX, y: BY, w: BW, h: BH } = bx;
+
+  // Draw inside the box
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(BX, BY, BW, BH);
+  ctx.clip();
+
+  // Box background (dark base)
+  ctx.fillStyle = '#0a0a14';
+  ctx.fillRect(BX, BY, BW, BH);
+
+  // Coord helpers: rel(0-1) → screen px
+  const sx = r => BX + r * BW;
+  const sy = r => BY + r * BH;
+  const sr = r => r * Math.min(BW, BH);
+
+  // ── LAYER 1: Grid (neutral base) ────────────────────────────────────────
+  if (E.neutral > 0.05) {
+    const gridAlpha = E.neutral * 0.18;
+    const gridStep = sr(0.12);
+    ctx.strokeStyle = `rgba(148,163,184,${gridAlpha})`;
+    ctx.lineWidth = 0.5;
+    for (let gx = BX; gx < BX+BW; gx += gridStep) {
+      ctx.beginPath(); ctx.moveTo(gx,BY); ctx.lineTo(gx,BY+BH); ctx.stroke();
+    }
+    for (let gy = BY; gy < BY+BH; gy += gridStep) {
+      ctx.beginPath(); ctx.moveTo(BX,gy); ctx.lineTo(BX+BW,gy); ctx.stroke();
+    }
+    // Grid distortion wave
+    const wAlpha = E.neutral * 0.08;
+    ctx.strokeStyle = `rgba(148,163,184,${wAlpha})`;
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 6; i++) {
+      ctx.beginPath();
+      for (let xx = 0; xx <= BW; xx += 4) {
+        const yy = BY + BH*(0.1+i*0.15) + Math.sin(xx/BW*Math.PI*4 + t + i)*sr(0.04)*E.neutral;
+        if (xx === 0) ctx.moveTo(BX+xx, yy);
+        else ctx.lineTo(BX+xx, yy);
+      }
+      ctx.stroke();
+    }
+  }
+
+  // ── LAYER 2: Orbs (happy) ────────────────────────────────────────────────
+  if (E.happy > 0.02) {
+    orbs.forEach((o, i) => {
+      o.phase += o.speed * (0.5 + E.happy);
+      o.x += o.vx * (0.5 + E.happy * 1.5);
+      o.y += o.vy * (0.5 + E.happy * 1.5);
+      if (o.x < 0.05 || o.x > 0.95) o.vx *= -1;
+      if (o.y < 0.05 || o.y > 0.95) o.vy *= -1;
+
+      const px = sx(o.x), py = sy(o.y);
+      const r = sr(o.base * (0.6 + 0.4*Math.sin(o.phase)) * (0.3 + E.happy * 0.7));
+      const hue = o.hue + t * 30;
+
+      // Glow
+      const g = ctx.createRadialGradient(px,py,0,px,py,r*2.5);
+      g.addColorStop(0, `hsla(${hue},90%,70%,${0.35*E.happy})`);
+      g.addColorStop(0.4, `hsla(${hue},80%,60%,${0.12*E.happy})`);
+      g.addColorStop(1, `hsla(${hue},70%,50%,0)`);
+      ctx.beginPath(); ctx.arc(px,py,r*2.5,0,Math.PI*2);
+      ctx.fillStyle = g; ctx.fill();
+
+      // Core
+      ctx.beginPath(); ctx.arc(px,py,r,0,Math.PI*2);
+      ctx.fillStyle = `hsla(${hue},90%,80%,${0.7*E.happy})`;
+      ctx.fill();
+    });
+
+    // Organic flowing lines
+    lineSeeds.forEach((ls, i) => {
+      ls.phase += ls.speed * (0.5 + E.happy);
+      ctx.beginPath();
+      ctx.lineWidth = 0.8 + E.happy * 1.2;
+      const hue = 60 + i * 15 + t * 20;
+      ctx.strokeStyle = `hsla(${hue},75%,70%,${0.25*E.happy})`;
+      for (let step = 0; step <= 80; step++) {
+        const progress = step / 80;
+        const lx = sx(progress);
+        const ly = sy(0.5 + Math.sin(progress * ls.freq * Math.PI + ls.phase) * ls.amp
+                         + Math.cos(progress * ls.freq * 1.7 * Math.PI + ls.phase * 1.3) * ls.amp * 0.5);
+        if (step === 0) ctx.moveTo(lx, ly); else ctx.lineTo(lx, ly);
+      }
+      ctx.stroke();
+    });
+
+    // Spawn happy particles
+    if (Math.random() < E.happy * 0.4)
+      spawnParticle(rand(0.1,0.9), rand(0.3,0.9), 'happy');
+  }
+
+  // ── LAYER 3: Angry shards + turbulence ──────────────────────────────────
+  if (E.angry > 0.05) {
+    // Background tint
+    ctx.fillStyle = `rgba(80,10,10,${E.angry * 0.35})`;
+    ctx.fillRect(BX, BY, BW, BH);
+
+    // Turbulence lines
+    const turbLines = Math.round(E.angry * 18);
+    for (let i = 0; i < turbLines; i++) {
+      const x1 = sx(Math.random()), y1 = sy(Math.random());
+      const len = sr(0.05 + Math.random() * 0.2);
+      const angle = Math.random() * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x1 + Math.cos(angle)*len, y1 + Math.sin(angle)*len);
+      ctx.strokeStyle = `hsla(${rand(0,30)},85%,55%,${E.angry * 0.5})`;
+      ctx.lineWidth = 0.5 + Math.random() * 1.5;
+      ctx.stroke();
+    }
+
+    // Shards
+    shards.forEach(s => {
+      s.life -= s.decay * E.angry;
+      s.x += s.vx * E.angry;
+      s.y += s.vy * E.angry;
+      s.angle += s.rotSpeed * E.angry;
+      if (s.life <= 0) {
+        s.x = rand(.2,.8); s.y = rand(.2,.8);
+        s.life = rand(.4,1); s.angle = rand(0,Math.PI*2);
+        s.vx = rand(-.008,.008); s.vy = rand(-.008,.008);
+      }
+      const px = sx(s.x), py = sy(s.y), pr = sr(s.size);
+      ctx.save();
+      ctx.translate(px, py); ctx.rotate(s.angle);
+      ctx.beginPath();
+      ctx.moveTo(0, -pr); ctx.lineTo(pr*0.4, pr*0.3);
+      ctx.lineTo(-pr*0.4, pr*0.3); ctx.closePath();
+      ctx.fillStyle = `hsla(${rand(0,25)},90%,55%,${s.life * E.angry * 0.7})`;
+      ctx.fill();
+      ctx.strokeStyle = `hsla(10,90%,70%,${s.life * E.angry * 0.4})`;
+      ctx.lineWidth = 0.5; ctx.stroke();
+      ctx.restore();
+    });
+
+    // Angry particles
+    if (Math.random() < E.angry * 0.5)
+      spawnParticle(rand(0.1,0.9), rand(0.5,0.9), 'angry');
+
+    // Crack lines radiating from center
+    if (E.angry > 0.4) {
+      const crackN = Math.round(E.angry * 8);
+      for (let i = 0; i < crackN; i++) {
+        const a = rand(0, Math.PI*2);
+        const len = sr(rand(.1, .4) * E.angry);
+        const cx2 = sx(0.5 + Math.cos(a)*0.05);
+        const cy2 = sy(0.5 + Math.sin(a)*0.05);
+        ctx.beginPath(); ctx.moveTo(cx2, cy2);
+        ctx.lineTo(cx2 + Math.cos(a)*len, cy2 + Math.sin(a)*len);
+        ctx.strokeStyle = `hsla(5,90%,60%,${E.angry * 0.25})`;
+        ctx.lineWidth = rand(0.3,1.5); ctx.stroke();
+      }
+    }
+  }
+
+  // ── LAYER 4: Surprised burst ─────────────────────────────────────────────
+  if (E.surprised > 0.05) {
+    // Radial burst lines
+    const burstN = Math.round(24 + E.surprised * 30);
+    for (let i = 0; i < burstN; i++) {
+      const a = (i / burstN) * Math.PI * 2 + t * 0.5;
+      const r1 = sr(0.12 + Math.sin(t*2 + i*0.4)*0.04);
+      const r2 = sr((0.18 + Math.sin(t*1.5 + i*0.3)*0.06) * E.surprised * 1.5);
+      const hue = 20 + i*8 + t*40;
+      ctx.beginPath();
+      ctx.moveTo(sx(0.5)+Math.cos(a)*r1, sy(0.5)+Math.sin(a)*r1);
+      ctx.lineTo(sx(0.5)+Math.cos(a)*r2, sy(0.5)+Math.sin(a)*r2);
+      ctx.strokeStyle = `hsla(${hue},90%,70%,${E.surprised * 0.55})`;
+      ctx.lineWidth = 0.5 + E.surprised;
+      ctx.stroke();
+    }
+
+    // Expanding rings
+    ringTrigger += E.surprised * 0.04;
+    if (ringTrigger > 1) {
+      ringTrigger = 0;
+      const rr = rings.find(r => !r.active);
+      if (rr) { rr.active=true; rr.r=0; rr.phase=Math.random()*Math.PI*2; }
+    }
+    rings.forEach(r => {
+      if (!r.active) return;
+      r.r += (0.004 + E.surprised * 0.012);
+      if (r.r > r.targetR) { r.active=false; r.r=0; return; }
+      const fade = 1 - r.r / r.targetR;
+      ctx.beginPath(); ctx.arc(sx(0.5), sy(0.5), sr(r.r), 0, Math.PI*2);
+      ctx.strokeStyle = `hsla(${40+r.phase*50},90%,70%,${fade * E.surprised * 0.6})`;
+      ctx.lineWidth = 1 + (1-fade)*2;
+      ctx.stroke();
+    });
+
+    // Surprised particles
+    if (Math.random() < E.surprised * 0.6)
+      spawnParticle(0.5+rand(-.1,.1), 0.5+rand(-.1,.1), 'surprised');
+
+    // Background aurora
+    const aGrad = ctx.createRadialGradient(sx(0.5),sy(0.5),0,sx(0.5),sy(0.5),sr(0.5));
+    aGrad.addColorStop(0, `hsla(${30+t*60},90%,60%,${E.surprised*0.2})`);
+    aGrad.addColorStop(0.5, `hsla(${200+t*40},80%,55%,${E.surprised*0.08})`);
+    aGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = aGrad; ctx.fillRect(BX,BY,BW,BH);
+  }
+
+  // ── LAYER 5: Particles (all types) ──────────────────────────────────────
+  particles.forEach(p => {
+    if (!p.active) return;
+    p.x += p.vx; p.y += p.vy;
+    p.life -= 0.015;
+    if (p.life <= 0 || p.x < -0.05 || p.x > 1.05 || p.y < -0.05 || p.y > 1.05)
+      { p.active=false; return; }
+    const pr = sr(p.size * p.life);
+    ctx.beginPath(); ctx.arc(sx(p.x), sy(p.y), Math.max(0.5,pr), 0, Math.PI*2);
+    ctx.fillStyle = `hsla(${p.hue},80%,70%,${p.life * p.alpha * 0.8})`;
+    ctx.fill();
+  });
+
+  ctx.restore(); // unclip
+
+  // ── Neutral particles outside box also ─────────────────────────────────
+  if (Math.random() < E.neutral * 0.15)
+    spawnParticle(rand(0.1,0.9), rand(0.1,0.9), 'neutral');
+
+  updateUI();
+  updateFaceFrame();
+}
+
+// ─── IDLE ANIMATION (no face) ───────────────────────────────────────────────
+function idleAnimation() {
+  // Gentle floating rings
+  const cx = W/2, cy = H/2;
+  for (let i = 0; i < 5; i++) {
+    const r = 40 + i*50 + Math.sin(t*0.8+i)*15;
+    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2);
+    ctx.strokeStyle = `rgba(148,163,184,${0.04+i*0.012})`;
+    ctx.lineWidth = 0.5; ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(224,224,238,0.07)';
+  ctx.font = '12px Inter,sans-serif'; ctx.textAlign='center';
+  ctx.fillText('Positionne ton visage dans le cadre', cx, cy-18);
+  ctx.font = '10px Space Mono,monospace';
+  ctx.fillStyle = 'rgba(224,224,238,0.035)';
+  ctx.fillText('Déplace-toi pour modifier le graphisme', cx, cy+8);
+  ctx.textAlign='left';
+}
+
+// ─── UI UPDATE ───────────────────────────────────────────────────────────────
+const ACCENT = { happy:'#4ade80', neutral:'#94a3b8', angry:'#f87171', surprised:'#fb923c' };
+const NAMES  = { happy:'Content', neutral:'Neutre', angry:'Fâché', surprised:'Surpris' };
+
+function updateUI() {
+  let dom = 'neutral', domVal = 0;
+  ['happy','neutral','angry','surprised'].forEach(k => {
+    const v = E[k];
+    const pct = Math.round(v*100);
+    document.getElementById(`p-${k}`).textContent = pct+'%';
+    document.getElementById(`b-${k}`).style.width = pct+'%';
+    const row = document.getElementById(`r-${k}`);
+    const isActive = k === dom || v > domVal;
+    if (v > domVal) { dom = k; domVal = v; }
+    row.classList.toggle('active', false); // reset below
+    document.getElementById(`p-${k}`).style.color = '';
+  });
+  document.getElementById(`r-${dom}`).classList.add('active');
+  document.getElementById(`p-${dom}`).style.color = ACCENT[dom];
+
+  // Effects
+  const setEff = (id,on) => {
+    const el=document.getElementById(id);
+    el.classList.toggle('on',on);
+  };
+  setEff('ef-orbs',      E.happy > 0.2);
+  setEff('ef-lines',     E.happy > 0.15);
+  setEff('ef-particles', E.happy>0.2 || E.angry>0.2 || E.surprised>0.2);
+  setEff('ef-rings',     E.surprised > 0.2);
+  setEff('ef-shards',    E.angry > 0.2);
+  setEff('ef-burst',     E.surprised > 0.3);
+  setEff('ef-grid',      E.neutral > 0.3);
+  setEff('ef-turbulence',E.angry > 0.3);
+
+  // Header pill
+  const pill = document.getElementById('hdr-pill');
+  if (faceRect) {
+    pill.textContent = NAMES[dom].toUpperCase()+' · '+Math.round(domVal*100)+'%';
+    pill.style.color = ACCENT[dom];
+    pill.style.borderColor = ACCENT[dom]+'55';
+  } else {
+    pill.textContent = 'EN ATTENTE';
+    pill.style.color = ''; pill.style.borderColor = '';
+  }
+
+  // Face tag
+  if (faceRect) {
+    document.getElementById('tag-emo').textContent = NAMES[dom];
+    document.getElementById('tag-emo').style.color = ACCENT[dom];
+    document.getElementById('tag-pct').textContent = ' '+Math.round(domVal*100)+'%';
+    document.getElementById('ff-tag').style.borderColor = ACCENT[dom]+'66';
+    document.querySelectorAll('.cc').forEach(c=>c.style.borderColor=ACCENT[dom]);
+  }
+}
+
+function updateFaceFrame() {
+  const ff = document.getElementById('ff');
+  if (!faceRect) { ff.style.display='none'; return; }
+  const {x,y,w,h} = faceRect;
+  ff.style.display = 'block';
+  ff.style.left = x+'px'; ff.style.top = y+'px';
+  ff.style.width = w+'px'; ff.style.height = h+'px';
+}
+
+// ─── FACE DETECTION ─────────────────────────────────────────────────────────
+const video = document.getElementById('video');
+
+async function startApp() {
+  const btn=document.getElementById('btn-start');
+  const ldr=document.getElementById('ldr');
+  btn.disabled=true; btn.textContent='Chargement…'; ldr.style.display='block';
+
+  let prog=0;
+  const fill=document.getElementById('ldr-fill');
+  const iv=setInterval(()=>{ prog=Math.min(prog+1.5,88); fill.style.width=prog+'%'; },80);
+
+  try {
+    const BASE='https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model';
+    await faceapi.nets.tinyFaceDetector.loadFromUri(BASE);
+    await faceapi.nets.faceExpressionNet.loadFromUri(BASE);
+    clearInterval(iv); fill.style.width='100%';
+  } catch(e) {
+    clearInterval(iv);
+    document.getElementById('start').style.display='none';
+    startDemo(); return;
+  }
+
+  try {
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:640,height:480}});
+    video.srcObject=stream; await video.play();
+    document.getElementById('start').style.display='none';
+    document.getElementById('hdr-pill').textContent='ACTIF';
+    detectLoop();
+  } catch(e) {
+    clearInterval(iv);
+    document.getElementById('start').style.display='none';
+    startDemo();
+  }
+}
+
+async function detectLoop() {
+  const opts=new faceapi.TinyFaceDetectorOptions({inputSize:160,scoreThreshold:0.35});
+  // Cache center rect
+  let centerEl = document.getElementById('center');
+
+  const loop = async () => {
+    if (video.readyState >= 2) {
+      try {
+        const det=await faceapi.detectSingleFace(video,opts).withFaceExpressions();
+        if (det) {
+          const e=det.expressions;
+          T.happy    = clamp((e.happy||0)*1.1, 0, 1);
+          T.angry    = clamp((e.angry||0)*1.2+(e.disgusted||0)*0.5, 0, 1);
+          T.surprised= clamp((e.surprised||0)*1.1, 0, 1);
+          T.neutral  = clamp((e.neutral||0), 0, 1);
+
+          // Normalize so they sum to ~1
+          const sum = T.happy+T.angry+T.surprised+T.neutral+.001;
+          T.happy/=sum; T.angry/=sum; T.surprised/=sum; T.neutral/=sum;
+
+          // Map face box to screen coordinates
+          const box=det.detection.box;
+          const vW=video.videoWidth||640, vH=video.videoHeight||480;
+          const cRect=centerEl.getBoundingClientRect();
+          const scaleX=cRect.width/vW, scaleY=cRect.height/vH;
+          const margin=0.12; // expand box
+          const bw=box.width*scaleX*(1+margin*2);
+          const bh=box.height*scaleY*(1+margin*2);
+          const bx=cRect.left+(cRect.width-(box.x+box.width)*scaleX)-bw*margin+bw*margin;
+          const by=cRect.top+box.y*scaleY-bh*margin;
+          // mirror X
+          const mirrorX=cRect.left+(cRect.width-((box.x+box.width)*scaleX));
+          faceRect={ x:mirrorX, y:cRect.top+box.y*scaleY, w:bw, h:bh };
+
+          // Convert to canvas coords (same as screen since canvas is fullscreen fixed)
+          // faceRect is already in screen=canvas coords
+        } else {
+          // Gradually return to neutral
+          T.happy=0; T.angry=0; T.surprised=0; T.neutral=1;
+          faceRect=null;
+        }
+      } catch(err){}
+    }
+    setTimeout(loop, 150);
+  };
+  loop();
+}
+
+// ─── DEMO MODE ───────────────────────────────────────────────────────────────
+function startDemo() {
+  let ph=0;
+  document.getElementById('hdr-pill').textContent='MODE DÉMO';
+  const centerEl=document.getElementById('center');
+
+  const iv=setInterval(()=>{
+    ph+=0.02;
+    const cRect=centerEl.getBoundingClientRect();
+    const margin=0.1;
+    faceRect={ x:cRect.left+cRect.width*0.2, y:cRect.top+cRect.height*0.08,
+               w:cRect.width*0.6, h:cRect.height*0.84 };
+    const s=Math.sin(ph);
+    T.happy    = clamp(s*0.85, 0,1);
+    T.angry    = clamp(-s*0.75, 0,1);
+    T.surprised= clamp(Math.sin(ph*1.6)*0.6, 0,1);
+    T.neutral  = 0.1;
+    const sum=T.happy+T.angry+T.surprised+T.neutral+.001;
+    T.happy/=sum; T.angry/=sum; T.surprised/=sum; T.neutral/=sum;
+  },50);
+}
+
+// ─── AUDIO ───────────────────────────────────────────────────────────────────
+let audioCtx;
+document.getElementById('btn-start').addEventListener('click', ()=>{
+  if (!audioCtx) audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+  startApp();
+});
+
+setInterval(()=>{
+  if (!audioCtx||E.happy<0.25) return;
+  const freq=500+Math.random()*500, now=audioCtx.currentTime;
+  const osc=audioCtx.createOscillator(), gain=audioCtx.createGain();
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.type='sine'; osc.frequency.setValueAtTime(freq,now);
+  osc.frequency.exponentialRampToValueAtTime(freq*1.7,now+0.06);
+  osc.frequency.exponentialRampToValueAtTime(freq*1.1,now+0.16);
+  gain.gain.setValueAtTime(0,now);
+  gain.gain.linearRampToValueAtTime(0.04*E.happy,now+0.02);
+  gain.gain.exponentialRampToValueAtTime(0.001,now+0.2);
+  osc.start(); osc.stop(now+0.22);
+},1500+Math.random()*2000|0);
+
+// Start
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
