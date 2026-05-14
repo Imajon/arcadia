@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEURAL MESH — Hand Interface</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #020408;
+    overflow: hidden;
+    font-family: 'Share Tech Mono', monospace;
+    color: #00ffcc;
+  }
+
+  #app {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+  }
+
+  #canvas-network {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 1;
+  }
+
+  #canvas-hand {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  #video {
+    position: absolute;
+    bottom: 20px; right: 20px;
+    width: 200px;
+    height: 150px;
+    border: 1px solid rgba(0,255,204,0.3);
+    border-radius: 4px;
+    z-index: 10;
+    opacity: 0.6;
+    transform: scaleX(-1);
+    object-fit: cover;
+  }
+
+  #hud {
+    position: absolute;
+    top: 24px; left: 24px;
+    z-index: 20;
+    pointer-events: none;
+  }
+
+  #hud h1 {
+    font-family: 'Orbitron', monospace;
+    font-size: 13px;
+    letter-spacing: 0.3em;
+    color: #00ffcc;
+    text-transform: uppercase;
+    opacity: 0.9;
+    margin-bottom: 6px;
+  }
+
+  .hud-line {
+    font-size: 10px;
+    color: rgba(0,255,204,0.5);
+    letter-spacing: 0.15em;
+    margin-bottom: 2px;
+  }
+
+  #status {
+    position: absolute;
+    bottom: 24px; left: 24px;
+    z-index: 20;
+    font-size: 10px;
+    color: rgba(0,255,204,0.5);
+    letter-spacing: 0.15em;
+  }
+
+  #status .dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #ff4444;
+    margin-right: 8px;
+    animation: blink 1s infinite;
+    vertical-align: middle;
+  }
+  #status.active .dot { background: #00ffcc; animation: none; }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
+  }
+
+  #overlay-start {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(2,4,8,0.92);
+    cursor: pointer;
+    transition: opacity 0.5s;
+  }
+
+  #overlay-start h2 {
+    font-family: 'Orbitron', monospace;
+    font-size: 22px;
+    letter-spacing: 0.4em;
+    color: #00ffcc;
+    margin-bottom: 16px;
+    text-transform: uppercase;
+  }
+
+  #overlay-start p {
+    font-size: 11px;
+    color: rgba(0,255,204,0.5);
+    letter-spacing: 0.2em;
+    margin-bottom: 8px;
+  }
+
+  .btn-start {
+    margin-top: 24px;
+    padding: 12px 36px;
+    border: 1px solid #00ffcc;
+    background: transparent;
+    color: #00ffcc;
+    font-family: 'Orbitron', monospace;
+    font-size: 12px;
+    letter-spacing: 0.3em;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+  .btn-start:hover {
+    background: rgba(0,255,204,0.1);
+    box-shadow: 0 0 20px rgba(0,255,204,0.3);
+  }
+
+  #noise-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+    opacity: 0.4;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="noise-overlay"></div>
+  <canvas id="canvas-network"></canvas>
+  <canvas id="canvas-hand"></canvas>
+  <video id="video" autoplay playsinline muted></video>
+
+  <div id="hud">
+    <h1>NEURAL MESH v2.4</h1>
+    <div class="hud-line">NODES: <span id="node-count">0</span></div>
+    <div class="hud-line">ACTIVE: <span id="active-count">0</span></div>
+    <div class="hud-line">PROPAGATION: <span id="prop-count">0</span></div>
+  </div>
+
+  <div id="status">
+    <span class="dot"></span><span id="status-text">INITIALIZING HAND TRACKING…</span>
+  </div>
+
+  <div id="overlay-start">
+    <h2>NEURAL MESH</h2>
+    <p>RÉSEAU DE NEURONES INTERACTIF</p>
+    <p>DÉTECTION MAIN PAR WEBCAM</p>
+    <button class="btn-start" id="btn-start">ACTIVER LA WEBCAM</button>
+  </div>
+</div>
+
+<!-- MediaPipe -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+const CFG = {
+  nodeCount: 120,
+  maxEdgeDist: 160,
+  activationRadius: 80,
+  decayRate: 0.94,
+  propagationDelay: 3,
+  baseAlpha: 0.18,
+  edgeBaseAlpha: 0.08,
+  pulseSpeed: 0.04,
+  handCircleR: 44,
+  handRippleMax: 90,
+  colors: {
+    bg: '#020408',
+    nodeBase: 'rgba(0,255,204,0.25)',
+    nodeActive: '#00ffcc',
+    edgeBase: 'rgba(0,200,160,0.08)',
+    edgeActive: '#00ffcc',
+    handCircle: 'rgba(0,255,204,0.9)',
+    handGlow: 'rgba(0,255,204,0.15)',
+    activation: '#00ffcc',
+    cluster: ['#00ffcc','#00ccff','#ff00aa','#ffcc00','#cc00ff'],
+  }
+};
+
+// ─── STATE ────────────────────────────────────────────────────────────────────
+const canvasN = document.getElementById('canvas-network');
+const ctxN = canvasN.getContext('2d');
+const canvasH = document.getElementById('canvas-hand');
+const ctxH = canvasH.getContext('2d');
+const video = document.getElementById('video');
+
+let W, H;
+let nodes = [];
+let edges = [];
+let handPos = null;
+let handVisible = false;
+let ripples = [];
+let tick = 0;
+let clusters = [];
+
+// ─── RESIZE ───────────────────────────────────────────────────────────────────
+function resize() {
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvasN.width = W; canvasN.height = H;
+  canvasH.width = W; canvasH.height = H;
+  initNetwork();
+}
+window.addEventListener('resize', resize);
+
+// ─── NETWORK INIT ─────────────────────────────────────────────────────────────
+function initNetwork() {
+  // Generate nodes with cluster affinity
+  nodes = [];
+  clusters = [];
+  const numClusters = 7;
+  for (let c = 0; c < numClusters; c++) {
+    clusters.push({
+      cx: 80 + Math.random() * (W - 160),
+      cy: 80 + Math.random() * (H - 160),
+      color: CFG.colors.cluster[c % CFG.colors.cluster.length]
+    });
+  }
+
+  for (let i = 0; i < CFG.nodeCount; i++) {
+    // Assign cluster
+    const cl = clusters[Math.floor(Math.random() * numClusters)];
+    const angle = Math.random() * Math.PI * 2;
+    const dist = Math.random() * 140 + 10;
+    const x = Math.max(10, Math.min(W - 10, cl.cx + Math.cos(angle) * dist));
+    const y = Math.max(10, Math.min(H - 10, cl.cy + Math.sin(angle) * dist));
+
+    nodes.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 0.15,
+      vy: (Math.random() - 0.5) * 0.15,
+      activation: 0,
+      activationPrev: 0,
+      phase: Math.random() * Math.PI * 2,
+      r: 2.5 + Math.random() * 2.5,
+      clusterColor: cl.color,
+      clusterIdx: clusters.indexOf(cl),
+      fireDelay: 0,
+    });
+  }
+
+  buildEdges();
+  document.getElementById('node-count').textContent = nodes.length;
+}
+
+function buildEdges() {
+  edges = [];
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const dx = nodes[i].x - nodes[j].x;
+      const dy = nodes[i].y - nodes[j].y;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if (d < CFG.maxEdgeDist) {
+        edges.push({
+          a: i, b: j,
+          dist: d,
+          pulse: 0,     // travelling pulse 0→1
+          active: false,
+          weight: 1 - d / CFG.maxEdgeDist,
+        });
+      }
+    }
+  }
+}
+
+// ─── ACTIVATION LOGIC ────────────────────────────────────────────────────────
+function activateNear(px, py, strength = 1.0) {
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    const dx = n.x - px;
+    const dy = n.y - py;
+    const d = Math.sqrt(dx*dx + dy*dy);
+    if (d < CFG.activationRadius) {
+      const factor = (1 - d / CFG.activationRadius) * strength;
+      n.activation = Math.min(1, n.activation + factor * 0.35);
+    }
+  }
+}
+
+function propagate() {
+  for (let e of edges) {
+    const na = nodes[e.a], nb = nodes[e.b];
+    const maxAct = Math.max(na.activation, nb.activation);
+    if (maxAct > 0.15) {
+      e.active = true;
+      // propagate to neighbor with weight delay
+      if (na.activation > nb.activation + 0.1) {
+        nb.activation = Math.min(1, nb.activation + na.activation * e.weight * 0.06);
+      } else if (nb.activation > na.activation + 0.1) {
+        na.activation = Math.min(1, na.activation + nb.activation * e.weight * 0.06);
+      }
+      // pulse travels
+      if (e.pulse < 1) e.pulse += 0.025 * maxAct;
+    } else {
+      e.active = false;
+      e.pulse = 0;
+    }
+  }
+
+  // decay
+  for (let n of nodes) {
+    n.activationPrev = n.activation;
+    n.activation *= CFG.decayRate;
+    if (n.activation < 0.001) n.activation = 0;
+    // Slow drift
+    n.x += n.vx;
+    n.y += n.vy;
+    if (n.x < 5 || n.x > W - 5) n.vx *= -1;
+    if (n.y < 5 || n.y > H - 5) n.vy *= -1;
+  }
+}
+
+// ─── DRAW NETWORK ────────────────────────────────────────────────────────────
+function drawNetwork() {
+  ctxN.clearRect(0, 0, W, H);
+
+  // Subtle background scan line
+  const scanY = (tick * 0.4) % H;
+  const scanGrad = ctxN.createLinearGradient(0, scanY - 60, 0, scanY + 60);
+  scanGrad.addColorStop(0, 'transparent');
+  scanGrad.addColorStop(0.5, 'rgba(0,255,204,0.015)');
+  scanGrad.addColorStop(1, 'transparent');
+  ctxN.fillStyle = scanGrad;
+  ctxN.fillRect(0, scanY - 60, W, 120);
+
+  // Draw edges
+  for (let e of edges) {
+    const na = nodes[e.a], nb = nodes[e.b];
+    const act = Math.max(na.activation, nb.activation);
+    if (act < 0.005) continue;
+
+    const alpha = CFG.edgeBaseAlpha + act * 0.7;
+    ctxN.beginPath();
+    ctxN.moveTo(na.x, na.y);
+    ctxN.lineTo(nb.x, nb.y);
+
+    if (e.active && act > 0.2) {
+      // Glowing active edge
+      const gAlpha = act * 0.8;
+      ctxN.strokeStyle = `rgba(0,255,204,${gAlpha})`;
+      ctxN.lineWidth = 0.5 + act * 1.5;
+      ctxN.shadowColor = '#00ffcc';
+      ctxN.shadowBlur = 4 + act * 8;
+    } else {
+      ctxN.strokeStyle = `rgba(0,200,160,${alpha})`;
+      ctxN.lineWidth = 0.3 + act * 0.8;
+      ctxN.shadowBlur = 0;
+    }
+    ctxN.stroke();
+
+    // Travelling pulse dot on edge
+    if (e.active && e.pulse > 0 && e.pulse < 1) {
+      const px = na.x + (nb.x - na.x) * e.pulse;
+      const py = na.y + (nb.y - na.y) * e.pulse;
+      ctxN.beginPath();
+      ctxN.arc(px, py, 2, 0, Math.PI * 2);
+      ctxN.fillStyle = `rgba(0,255,204,${act * 0.9})`;
+      ctxN.shadowColor = '#00ffcc';
+      ctxN.shadowBlur = 8;
+      ctxN.fill();
+    }
+  }
+
+  ctxN.shadowBlur = 0;
+
+  // Draw nodes
+  let activeCount = 0;
+  for (let n of nodes) {
+    const act = n.activation;
+    const pulse = Math.sin(tick * CFG.pulseSpeed + n.phase) * 0.5 + 0.5;
+
+    if (act > 0.01) activeCount++;
+
+    const r = n.r + act * 4 + pulse * 0.5;
+    const baseOpacity = 0.15 + pulse * 0.08;
+
+    // Glow halo
+    if (act > 0.1) {
+      const g = ctxN.createRadialGradient(n.x, n.y, 0, n.x, n.y, r * 4 + act * 12);
+      g.addColorStop(0, `rgba(0,255,204,${act * 0.4})`);
+      g.addColorStop(1, 'transparent');
+      ctxN.beginPath();
+      ctxN.arc(n.x, n.y, r * 4 + act * 12, 0, Math.PI * 2);
+      ctxN.fillStyle = g;
+      ctxN.fill();
+    }
+
+    // Node core
+    ctxN.beginPath();
+    ctxN.arc(n.x, n.y, r, 0, Math.PI * 2);
+    if (act > 0.1) {
+      ctxN.fillStyle = n.clusterColor;
+      ctxN.shadowColor = n.clusterColor;
+      ctxN.shadowBlur = 6 + act * 14;
+    } else {
+      ctxN.fillStyle = `rgba(0,200,160,${baseOpacity})`;
+      ctxN.shadowBlur = 0;
+    }
+    ctxN.fill();
+  }
+  ctxN.shadowBlur = 0;
+
+  document.getElementById('active-count').textContent = activeCount;
+  document.getElementById('prop-count').textContent = edges.filter(e => e.active).length;
+}
+
+// ─── DRAW HAND ────────────────────────────────────────────────────────────────
+function drawHand() {
+  ctxH.clearRect(0, 0, W, H);
+  if (!handPos) return;
+
+  const { x, y } = handPos;
+  const t = tick * 0.05;
+
+  // Ripple rings
+  for (let r of ripples) {
+    const prog = r.age / r.maxAge;
+    const radius = r.startR + (CFG.handRippleMax - r.startR) * prog;
+    const alpha = (1 - prog) * 0.35;
+    ctxH.beginPath();
+    ctxH.arc(x, y, radius, 0, Math.PI * 2);
+    ctxH.strokeStyle = `rgba(0,255,204,${alpha})`;
+    ctxH.lineWidth = 1;
+    ctxH.stroke();
+  }
+
+  // Outer glow
+  const gOuter = ctxH.createRadialGradient(x, y, CFG.handCircleR * 0.5, x, y, CFG.handCircleR * 2.8);
+  gOuter.addColorStop(0, 'rgba(0,255,204,0.12)');
+  gOuter.addColorStop(1, 'transparent');
+  ctxH.beginPath();
+  ctxH.arc(x, y, CFG.handCircleR * 2.8, 0, Math.PI * 2);
+  ctxH.fillStyle = gOuter;
+  ctxH.fill();
+
+  // Inner circle — dashed rotating
+  ctxH.save();
+  ctxH.translate(x, y);
+  ctxH.rotate(t);
+  ctxH.beginPath();
+  ctxH.arc(0, 0, CFG.handCircleR, 0, Math.PI * 2);
+  ctxH.setLineDash([8, 5]);
+  ctxH.strokeStyle = 'rgba(0,255,204,0.7)';
+  ctxH.lineWidth = 1.2;
+  ctxH.shadowColor = '#00ffcc';
+  ctxH.shadowBlur = 10;
+  ctxH.stroke();
+  ctxH.setLineDash([]);
+  ctxH.restore();
+
+  // Inner solid ring
+  ctxH.beginPath();
+  ctxH.arc(x, y, CFG.handCircleR * 0.55, 0, Math.PI * 2);
+  ctxH.strokeStyle = 'rgba(0,255,204,0.4)';
+  ctxH.lineWidth = 0.8;
+  ctxH.shadowBlur = 0;
+  ctxH.stroke();
+
+  // Center dot
+  ctxH.beginPath();
+  ctxH.arc(x, y, 3.5, 0, Math.PI * 2);
+  ctxH.fillStyle = '#00ffcc';
+  ctxH.shadowColor = '#00ffcc';
+  ctxH.shadowBlur = 12;
+  ctxH.fill();
+  ctxH.shadowBlur = 0;
+
+  // Crosshair lines
+  ctxH.strokeStyle = 'rgba(0,255,204,0.3)';
+  ctxH.lineWidth = 0.7;
+  const cl = CFG.handCircleR * 1.5;
+  ctxH.beginPath();
+  ctxH.moveTo(x - cl, y); ctxH.lineTo(x - CFG.handCircleR * 1.05, y);
+  ctxH.moveTo(x + CFG.handCircleR * 1.05, y); ctxH.lineTo(x + cl, y);
+  ctxH.moveTo(x, y - cl); ctxH.lineTo(x, y - CFG.handCircleR * 1.05);
+  ctxH.moveTo(x, y + CFG.handCircleR * 1.05); ctxH.lineTo(x, y + cl);
+  ctxH.stroke();
+
+  // Label
+  ctxH.font = '9px Share Tech Mono';
+  ctxH.fillStyle = 'rgba(0,255,204,0.5)';
+  ctxH.fillText(`[${Math.round(x)}, ${Math.round(y)}]`, x + CFG.handCircleR + 8, y - 4);
+}
+
+// ─── RIPPLE UPDATE ────────────────────────────────────────────────────────────
+function updateRipples() {
+  if (handVisible && tick % 18 === 0) {
+    ripples.push({ age: 0, maxAge: 40, startR: CFG.handCircleR });
+  }
+  ripples = ripples.filter(r => {
+    r.age++;
+    return r.age < r.maxAge;
+  });
+}
+
+// ─── MAIN LOOP ────────────────────────────────────────────────────────────────
+function loop() {
+  tick++;
+
+  if (handPos && handVisible) {
+    activateNear(handPos.x, handPos.y);
+  }
+
+  propagate();
+  updateRipples();
+  drawNetwork();
+  drawHand();
+
+  requestAnimationFrame(loop);
+}
+
+// ─── MEDIAPIPE HANDS ─────────────────────────────────────────────────────────
+let hands;
+let cameraStarted = false;
+
+function initHands() {
+  hands = new Hands({
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+  });
+
+  hands.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.6,
+  });
+
+  hands.onResults(onHandResults);
+}
+
+function onHandResults(results) {
+  if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+    const lm = results.multiHandLandmarks[0];
+    // Use palm center (landmark 9 = middle finger base)
+    const palm = lm[9];
+    // Mirror X (video is mirrored)
+    const x = (1 - palm.x) * W;
+    const y = palm.y * H;
+
+    handPos = { x, y };
+    handVisible = true;
+
+    const statusEl = document.getElementById('status');
+    statusEl.classList.add('active');
+    document.getElementById('status-text').textContent = 'MAIN DÉTECTÉE — RÉSEAU EN ACTIVATION';
+  } else {
+    handVisible = false;
+    if (handPos) {
+      // Slow fade
+      setTimeout(() => { if (!handVisible) handPos = null; }, 800);
+    }
+    const statusEl = document.getElementById('status');
+    statusEl.classList.remove('active');
+    document.getElementById('status-text').textContent = 'EN ATTENTE DE MAIN…';
+  }
+}
+
+async function startCamera() {
+  if (cameraStarted) return;
+  cameraStarted = true;
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+    video.srcObject = stream;
+    await video.play();
+
+    const camera = new Camera(video, {
+      onFrame: async () => {
+        await hands.send({ image: video });
+      },
+      width: 640,
+      height: 480,
+    });
+    camera.start();
+
+    document.getElementById('status').classList.remove('active');
+    document.getElementById('status-text').textContent = 'WEBCAM ACTIVE — BOUGEZ LA MAIN';
+  } catch (e) {
+    console.warn('Webcam non disponible, mode souris activé');
+    document.getElementById('status-text').textContent = 'MODE SOURIS (WEBCAM INDISPONIBLE)';
+    enableMouseFallback();
+  }
+}
+
+function enableMouseFallback() {
+  window.addEventListener('mousemove', e => {
+    handPos = { x: e.clientX, y: e.clientY };
+    handVisible = true;
+  });
+  window.addEventListener('mouseleave', () => {
+    handVisible = false;
+    setTimeout(() => { if (!handVisible) handPos = null; }, 500);
+  });
+  document.getElementById('status').classList.add('active');
+  document.getElementById('status-text').textContent = 'MODE SOURIS ACTIF';
+}
+
+// ─── BOOT ─────────────────────────────────────────────────────────────────────
+document.getElementById('btn-start').addEventListener('click', async () => {
+  const overlay = document.getElementById('overlay-start');
+  overlay.style.opacity = '0';
+  overlay.style.pointerEvents = 'none';
+  setTimeout(() => overlay.remove(), 500);
+
+  initHands();
+  await startCamera();
+});
+
+resize();
+loop();
+
+// Auto-idle animation (background activation pulses without hand)
+setInterval(() => {
+  if (!handVisible) {
+    const n = nodes[Math.floor(Math.random() * nodes.length)];
+    if (n) n.activation = Math.min(1, n.activation + 0.3);
+  }
+}, 600);
+</script>
+</body>
+</html>

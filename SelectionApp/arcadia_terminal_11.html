@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ARCADIA — HACK</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{width:100%;height:100%;background:#000;overflow:hidden;font-family:'Courier New',monospace;cursor:none;}
+
+canvas#bg {position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;}
+canvas#hud{position:fixed;top:0;left:0;width:100%;height:100%;z-index:1;pointer-events:none;}
+
+#scanline{position:fixed;top:0;left:0;width:100%;height:100%;z-index:2;pointer-events:none;
+  background:repeating-linear-gradient(to bottom,transparent 0,transparent 2px,rgba(0,0,0,0.06) 2px,rgba(0,0,0,0.06) 4px);}
+#vignette{position:fixed;top:0;left:0;width:100%;height:100%;z-index:3;pointer-events:none;
+  background:radial-gradient(ellipse at center,transparent 40%,rgba(0,0,0,0.85) 100%);}
+
+/* ── TERMINAL UNIQUE centré en bas ── */
+#terminal{
+  position:fixed;z-index:8;pointer-events:none;
+  width:520px;
+  left:50%;transform:translateX(-50%);
+  bottom:28px;
+  font-family:'Courier New',monospace;
+  border:1px solid rgba(255,255,255,0.09);
+  background:rgba(2,4,6,0.88);
+  backdrop-filter:blur(4px);
+  transition:border-color 0.4s,box-shadow 0.4s;
+}
+#terminal.alert{border-color:#ff4444;box-shadow:0 0 20px rgba(255,60,60,0.3);}
+#terminal.secure{border-color:#00e5ff;box-shadow:0 0 16px rgba(0,229,255,0.2);}
+
+.t-header{
+  display:flex;align-items:center;gap:8px;
+  padding:6px 12px;
+  border-bottom:1px solid rgba(255,255,255,0.06);
+  background:rgba(255,255,255,0.02);
+  font-size:9px;letter-spacing:0.18em;color:rgba(255,255,255,0.32);text-transform:uppercase;
+}
+.t-dot{width:6px;height:6px;border-radius:50%;}
+.t-body{
+  padding:7px 12px 8px;
+  height:148px;overflow:hidden;
+  display:flex;flex-direction:column;justify-content:flex-end;gap:1px;
+}
+.t-line{white-space:pre;margin:0;line-height:1.52;opacity:0;font-size:10.5px;
+  animation:tli 0.1s ease forwards;}
+@keyframes tli{from{opacity:0;transform:translateX(-4px)}to{opacity:1;transform:none}}
+.t-footer{
+  padding:4px 12px;border-top:1px solid rgba(255,255,255,0.05);
+  font-size:9px;color:rgba(255,255,255,0.2);letter-spacing:0.1em;
+  display:flex;justify-content:space-between;align-items:center;
+}
+
+/* ── SCORE HUD ── */
+#score-hud{
+  position:fixed;top:22px;left:50%;transform:translateX(-50%);
+  z-index:10;display:flex;gap:40px;align-items:center;
+  font-size:11px;letter-spacing:0.15em;color:#fff;text-transform:uppercase;
+}
+#score-atk{color:#ff6600;font-size:13px;font-weight:bold;}
+#score-def{color:#00e5ff;font-size:13px;font-weight:bold;}
+#timer-wrap{text-align:center;opacity:0.7;}
+#timer{font-size:22px;font-weight:bold;letter-spacing:0.05em;}
+#total-score{font-size:10px;color:rgba(255,255,255,0.4);}
+
+/* ── OVERLAY INTRO/FIN ── */
+#overlay{
+  position:fixed;top:0;left:0;width:100%;height:100%;z-index:20;
+  background:rgba(0,0,0,0.88);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:18px;
+  font-family:'Courier New',monospace;color:#fff;text-align:center;
+}
+#overlay.hidden{display:none;}
+#overlay h1{font-size:32px;letter-spacing:0.3em;text-transform:uppercase;color:#00e5ff;}
+#overlay h2{font-size:18px;letter-spacing:0.2em;color:#ff6600;margin-top:-8px;}
+#overlay p{font-size:12px;opacity:0.6;max-width:500px;line-height:1.7;letter-spacing:0.05em;}
+#overlay .rules{font-size:11px;opacity:0.5;line-height:2;max-width:460px;}
+.rule-atk{color:#ff6600;}
+.rule-def{color:#00e5ff;}
+#overlay .start-hint{font-size:11px;opacity:0.4;letter-spacing:0.2em;margin-top:8px;animation:blink 1.2s step-end infinite;}
+@keyframes blink{50%{opacity:0.1;}}
+
+#webcam{position:fixed;top:-9999px;left:-9999px;width:320px;height:240px;}
+#camstatus{position:fixed;bottom:16px;right:24px;z-index:10;font-size:9px;letter-spacing:0.1em;opacity:0.4;color:#fff;}
+#camstatus.active{color:#00ff9d;opacity:0.6;}
+#camstatus.error{color:#ff4444;opacity:0.6;}
+</style>
+</head>
+<body>
+
+<canvas id="bg"></canvas>
+<canvas id="hud"></canvas>
+<video id="webcam" autoplay muted playsinline></video>
+
+<!-- Score HUD -->
+<div id="score-hud">
+  <div><span style="color:#ff6600;font-size:9px;letter-spacing:0.15em">ATTAQUE</span><br><span id="score-atk">0</span></div>
+  <div id="timer-wrap"><div id="timer">2:00</div><div id="total-score">pts: 0</div></div>
+  <div><span style="color:#00e5ff;font-size:9px;letter-spacing:0.15em">DÉFENSE</span><br><span id="score-def">0</span></div>
+</div>
+
+<!-- Terminal unique -->
+<div id="terminal" class="secure">
+  <div class="t-header">
+    <span class="t-dot" id="t-dot" style="background:#00e5ff"></span>
+    <span id="t-title">ARCADIA::SYSTEM — EN VEILLE</span>
+    <span style="margin-left:auto;opacity:0.5;" id="t-integrity">INTÉGRITÉ: 100%</span>
+  </div>
+  <div class="t-body" id="t-body">
+    <span class="t-line" style="opacity:0.35;color:rgba(180,180,180,0.5)">Système en attente. Placez deux mains dans le champ.</span>
+  </div>
+  <div class="t-footer">
+    <span id="t-state">IDLE</span>
+    <span id="t-meta">—</span>
+  </div>
+</div>
+
+<!-- Overlay intro -->
+<div id="overlay">
+  <h1>ARCADIA</h1>
+  <h2>:: HACK ::</h2>
+  <p>Un jeu à deux mains. Deux rôles opposés.<br>Deux minutes pour dominer le système.</p>
+  <div class="rules">
+    <div><span class="rule-atk">● MAIN GAUCHE — ATTAQUE</span><br>
+    Lance des failles (particules orange) sur le système.<br>
+    Main <b>ouverte</b> → frappe forte. Main <b>fermée</b> → charge lente.</div>
+    <br>
+    <div><span class="rule-def">● MAIN DROITE — DÉFENSE</span><br>
+    Intercepte les failles avec le cercle de défense.<br>
+    Main <b>ouverte</b> → zone large. Main <b>fermée</b> → focus précis.</div>
+    <br>
+    <div style="color:rgba(255,255,200,0.6)">⚠ Si les deux mains font la même action simultanément,<br>
+    le système contre-attaque — malus immédiat.</div>
+  </div>
+  <div class="start-hint">Montrez vos deux mains pour démarrer</div>
+</div>
+
+<div id="scanline"></div>
+<div id="vignette"></div>
+<div id="camstatus">CAM : init…</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script>
+// ════════════════════════════════════════════════════════════
+// CANVAS
+// ════════════════════════════════════════════════════════════
+const canvas=document.getElementById('bg'),ctx=canvas.getContext('2d');
+const hudCanvas=document.getElementById('hud'),hud=hudCanvas.getContext('2d');
+let W,H;
+
+// ════════════════════════════════════════════════════════════
+// PALETTES & UTILS
+// ════════════════════════════════════════════════════════════
+const PALETTES=[
+  {base:'#00ff9d',accent:'#00d4ff',key:'#ff00c8'},
+  {base:'#ff7700',accent:'#ffcc00',key:'#ff0055'},
+  {base:'#cc44ff',accent:'#9955ff',key:'#00ffcc'},
+  {base:'#44d9ff',accent:'#dddddd',key:'#ff6688'},
+  {base:'#aaff00',accent:'#00ff99',key:'#ff4444'},
+];
+let curPI=0,nxtPI=1,palBlend=0,palCycle=0;
+const PAL_DUR=2800;
+
+function lerpHex(a,b,t){
+  const ah=parseInt(a.slice(1,7),16),bh=parseInt(b.slice(1,7),16);
+  const ar=(ah>>16)&255,ag=(ah>>8)&255,ab=ah&255;
+  const br=(bh>>16)&255,bg=(bh>>8)&255,bb=bh&255;
+  return '#'+[ar+(br-ar)*t,ag+(bg-ag)*t,ab+(bb-ab)*t].map(v=>Math.round(v).toString(16).padStart(2,'0')).join('');
+}
+function getPal(){
+  const a=PALETTES[curPI],b=PALETTES[nxtPI],t=palBlend;
+  return {base:lerpHex(a.base,b.base,t),accent:lerpHex(a.accent,b.accent,t),key:lerpHex(a.key,b.key,t)};
+}
+
+// ════════════════════════════════════════════════════════════
+// MOTS FRANÇAIS dans les streams
+// ════════════════════════════════════════════════════════════
+const FR_WORDS=['FLUX','ONDE','CODE','FAILLE','BREACH','PATCH','FIREWALL',
+  'INTRUS','SIGNAL','DONNÉES','SÉCURISÉ','ALERTE','RÉSEAU','NOYAU',
+  'DÉFENSE','FRAPPE','HACK','VERROU','ACCÈS','REFUSÉ','CRYPTÉ',
+  'ARCADIA','9 MAI','IMMERSIF'];
+function randFR(){return FR_WORDS[~~(Math.random()*FR_WORDS.length)];}
+
+// ════════════════════════════════════════════════════════════
+// STREAMS
+// ════════════════════════════════════════════════════════════
+const FS=14;
+let cols,rows,streams=[],streamHues=[];
+
+const CL='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%&*_+-=[]{}|;:.<>?';
+const CJ='アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロ';
+const CS='░▒▓│┤╣║╗╝┐└┴┬├─┼╚╔╩╦╠═╬';
+function rc(){const r=Math.random();if(r<0.5)return CL[~~(Math.random()*CL.length)];if(r<0.8)return CJ[~~(Math.random()*CJ.length)];return CS[~~(Math.random()*CS.length)];}
+
+function initStreamColors(n){streamHues=[];for(let c=0;c<n;c++)streamHues.push((c*137.508)%360);}
+
+function mkStream(col,rand){
+  return {col,y:rand?Math.random()*-rows:-~~(Math.random()*8),
+    len:6+~~(Math.random()*20),spd:0.35+Math.random()*1.1,
+    chars:[],wordSlot:Math.random()<0.10?{w:randFR(),pos:0,t:0}:null,
+    dvx:0,dvy:0,dx:0,dy:0};
+}
+function initStreams(){
+  cols=~~(W/FS);rows=~~(H/FS);
+  initStreamColors(cols);
+  streams=[];for(let c=0;c<cols;c++)streams.push(mkStream(c,true));
+}
+
+// ════════════════════════════════════════════════════════════
+// MAINS — MediaPipe
+// ════════════════════════════════════════════════════════════
+// Convention : hand.idx 0 = première main détectée
+// Rôle : déterminé par position horizontale
+// Main GAUCHE (x > 0.5 en miroir = côté droit écran) = ATTAQUE
+// Main DROITE (x < 0.5 en miroir = côté gauche écran) = DÉFENSE
+// On assigne le rôle par palmX : palmX > W/2 → ATTAQUE, < W/2 → DÉFENSE
+
+const COL_ATK='#ff6600', COL_DEF='#00e5ff';
+const HAND_R_MIN=45, HAND_R_MAX=160;
+const TIP_LM=[4,8,12,16,20];
+const ALL_LM=[...Array(21).keys()];
+
+let hands=[]; // [{pts,tips,palmX,palmY,geo,role:'atk'|'def',color}]
+let repZones=[]; // [{cx,cy,r,role}] — un seul disque par main
+
+const camEl=document.getElementById('webcam');
+const camSt=document.getElementById('camstatus');
+
+function analyzeHand(lms){
+  const fingerPairs=[[4,2],[8,6],[12,10],[16,14],[20,18]];
+  let tot=0;
+  const palmSpan=Math.hypot(lms[0].x-lms[9].x,lms[0].y-lms[9].y)*Math.hypot(W,H);
+  fingerPairs.forEach(([tip,base])=>{
+    tot+=Math.min(1,Math.hypot(lms[tip].x-lms[base].x,lms[tip].y-lms[base].y)*Math.hypot(W,H)/(palmSpan*0.9||1));
+  });
+  const openness=Math.min(1,tot/5);
+  const wrist=lms[0],mid=lms[9];
+  const rotation=Math.atan2((mid.y-wrist.y)*H,(1-mid.x-(1-wrist.x))*W);
+  const spread=Math.hypot((lms[4].x-lms[20].x)*W,(lms[4].y-lms[20].y)*H);
+  return {openness,rotation,spread};
+}
+
+// Rayon = distance max paume→bouts doigts + marge, tous points DEDANS
+function tipRadius(hand){
+  let maxD=0;
+  hand.tips.forEach(t=>maxD=Math.max(maxD,Math.hypot(t.x-hand.palmX,t.y-hand.palmY)));
+  // Inclure aussi le poignet
+  const wrist=hand.pts[0];
+  maxD=Math.max(maxD,Math.hypot(wrist.x-hand.palmX,wrist.y-hand.palmY));
+  return Math.min(HAND_R_MAX,Math.max(HAND_R_MIN,maxD+18));
+}
+
+function initHands(){
+  if(!navigator.mediaDevices||!window.Hands){camSt.textContent='Webcam indisponible';camSt.classList.add('error');return;}
+  const mp=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+  mp.setOptions({maxNumHands:2,modelComplexity:0,minDetectionConfidence:0.65,minTrackingConfidence:0.5});
+  mp.onResults(res=>{
+    hands=[];repZones=[];
+    if(!res.multiHandLandmarks) return;
+    res.multiHandLandmarks.forEach((lms,hi)=>{
+      const palmX=(1-lms[9].x)*W, palmY=lms[9].y*H;
+      const pts=ALL_LM.map(i=>({x:(1-lms[i].x)*W,y:lms[i].y*H}));
+      const tips=TIP_LM.map(i=>({x:(1-lms[i].x)*W,y:lms[i].y*H}));
+      const geo=analyzeHand(lms);
+      // Rôle par position : gauche écran = défense, droite écran = attaque
+      const role=palmX>W/2?'atk':'def';
+      const color=role==='atk'?COL_ATK:COL_DEF;
+      hands.push({pts,tips,palmX,palmY,geo,role,color,idx:hi});
+    });
+    // Zones de répulsion = cercles de la forme (rayon calculé par handShapes)
+    hands.forEach(h=>{
+      const shp=handShapes[h.idx]||handShapes[0];
+      repZones.push({cx:h.palmX,cy:h.palmY,r:shp.r,role:h.role,color:h.color,handIdx:h.idx});
+    });
+    onHandUpdate();
+  });
+  const cam=new Camera(camEl,{onFrame:async()=>{await mp.send({image:camEl});},width:320,height:240});
+  cam.start()
+    .then(()=>{camSt.textContent='Détection active';camSt.classList.add('active');})
+    .catch(()=>{camSt.textContent='Accès caméra refusé';camSt.classList.add('error');});
+}
+
+// Répulsion uniquement depuis repZones (disque de la forme)
+function repulsion(px,py){
+  let dx=0,dy=0,nearColor=null,nearRole=null,maxF=0;
+  for(const z of repZones){
+    const ex=px-z.cx,ey=py-z.cy,d=Math.hypot(ex,ey);
+    if(d<z.r&&d>1){
+      const f=4.5*Math.pow(1-d/z.r,2);
+      dx+=(ex/d)*f;dy+=(ey/d)*f;
+      if(f>maxF){maxF=f;nearColor=z.color;nearRole=z.role;}
+    }
+  }
+  return {dx,dy,nearColor,nearRole,mag:Math.hypot(dx,dy)};
+}
+
+// ════════════════════════════════════════════════════════════
+// FORMES DE MAINS (canvas hud — effacé chaque frame)
+// ════════════════════════════════════════════════════════════
+const HEX_N=6;
+const handShapes=[
+  {r:65,rot:0,phase:0,edgeHit:[-1,0]},
+  {r:65,rot:0,phase:0,edgeHit:[-1,0]},
+];
+
+function hitHexEdge(shp,cx,cy,px,py){
+  const lx=px-cx,ly=py-cy;
+  const cosR=Math.cos(-shp.rot),sinR=Math.sin(-shp.rot);
+  const rx=lx*cosR-ly*sinR,ry=lx*sinR+ly*cosR;
+  let angle=Math.atan2(ry,rx)+Math.PI/2;
+  if(angle<0)angle+=Math.PI*2;
+  return Math.floor((angle/(Math.PI*2))*HEX_N)%HEX_N;
+}
+
+function drawHandShape(hand,shp){
+  const cx=hand.palmX,cy=hand.palmY,col=hand.color;
+  const c=hud;
+
+  // Rayon = enveloppe tous points dedans
+  const targetR=tipRadius(hand);
+  shp.r+=(targetR-shp.r)*0.10;
+  shp.rot+=(hand.geo.rotation-shp.rot)*0.08;
+  shp.phase+=0.012+hand.geo.openness*0.025;
+  shp.edgeHit[1]=Math.max(0,shp.edgeHit[1]-0.035);
+
+  // Sync zone répulsion
+  const z=repZones.find(z=>z.handIdx===hand.idx);
+  if(z){z.cx=cx;z.cy=cy;z.r=shp.r;}
+
+  const r=shp.r,ph=shp.phase,rot=shp.rot;
+
+  c.save();
+  c.translate(cx,cy);
+  c.rotate(rot);
+  c.shadowBlur=0;
+
+  // Cercle principal
+  c.beginPath();c.arc(0,0,r,0,Math.PI*2);
+  c.strokeStyle=col+'bb';c.lineWidth=1.5;c.stroke();
+
+  // Hexagone inscrit
+  const hexV=[];
+  for(let i=0;i<HEX_N;i++){
+    const a=(i/HEX_N)*Math.PI*2-Math.PI/2;
+    hexV.push({x:Math.cos(a)*r,y:Math.sin(a)*r});
+  }
+  for(let i=0;i<HEX_N;i++){
+    const a=hexV[i],b=hexV[(i+1)%HEX_N];
+    const hit=shp.edgeHit[0]===i&&shp.edgeHit[1]>0.05;
+    const al=hit?Math.floor(80+shp.edgeHit[1]*175).toString(16).padStart(2,'0'):'40';
+    c.beginPath();c.moveTo(a.x,a.y);c.lineTo(b.x,b.y);
+    c.strokeStyle=col+al;c.lineWidth=hit?1+shp.edgeHit[1]*2.5:0.8;c.stroke();
+    c.beginPath();c.arc(a.x,a.y,hit?3.5:2,0,Math.PI*2);
+    c.fillStyle=col+(hit?'ff':'55');c.fill();
+  }
+
+  // Artefacts rotatifs
+  c.strokeStyle=col+'88';c.lineWidth=1.2;
+  c.beginPath();c.arc(0,0,r+10,ph,ph+Math.PI*0.28);c.stroke();
+  c.beginPath();c.arc(0,0,r+10,ph+Math.PI,ph+Math.PI+Math.PI*0.18);c.stroke();
+  c.strokeStyle=col+'44';c.lineWidth=1;
+  c.beginPath();c.arc(0,0,r-10,-ph*0.7,-ph*0.7+Math.PI*0.35);c.stroke();
+  for(let i=0;i<8;i++){
+    const a=ph*0.4+(i/8)*Math.PI*2;
+    const i0=(i%2===0)?r+6:r+4,i1=(i%2===0)?r+14:r+10;
+    c.strokeStyle=col+(i%2===0?'bb':'44');c.lineWidth=i%2===0?1.2:0.7;
+    c.beginPath();c.moveTo(Math.cos(a)*i0,Math.sin(a)*i0);c.lineTo(Math.cos(a)*i1,Math.sin(a)*i1);c.stroke();
+  }
+  // Flèche de cap
+  c.strokeStyle=col+'cc';c.lineWidth=1.5;
+  c.beginPath();c.moveTo(0,0);c.lineTo(0,-r*0.5);c.stroke();
+  c.beginPath();c.moveTo(-4,-r*0.5+8);c.lineTo(0,-r*0.5);c.lineTo(4,-r*0.5+8);c.stroke();
+  // Pivot
+  c.beginPath();c.arc(0,0,4,0,Math.PI*2);c.fillStyle=col+'cc';c.fill();
+
+  c.restore();
+
+  // Label rôle + diamètre
+  const rotDeg=Math.round(hand.geo.rotation*180/Math.PI);
+  c.save();
+  c.font=`bold 8px 'Courier New',monospace`;
+  c.fillStyle=col+'bb';c.textAlign='center';
+  c.fillText(hand.role==='atk'?'ATTAQUE':'DÉFENSE',cx,cy-r-22);
+  c.font=`8px 'Courier New',monospace`;c.fillStyle=col+'66';
+  c.fillText(`${rotDeg}°  ø${Math.round(r*2)}`,cx,cy-r-12);
+  c.textAlign='left';c.restore();
+
+  // Points landmarks
+  hand.pts.forEach((pt,ii)=>{
+    const tip=TIP_LM.includes(ALL_LM[ii]);
+    c.beginPath();c.arc(pt.x,pt.y,tip?2.8:1.4,0,Math.PI*2);
+    c.fillStyle=tip?col+'cc':col+'33';c.fill();
+  });
+}
+
+// ════════════════════════════════════════════════════════════
+// JEU — états, scores, failles
+// ════════════════════════════════════════════════════════════
+const GAME_DURATION=120; // secondes
+let gameState='intro'; // intro | playing | end
+let gameTimer=GAME_DURATION;
+let lastSecTs=0;
+let scoreAtk=0,scoreDef=0;
+let integrity=100; // santé du système 0..100
+let frameN=0;
+
+// Failles — particules de jeu plus grosses
+// type 'faille' : orange, lancée par ATK, doit être interceptée par DEF
+// type 'patch'  : cyan,   lancée par DEF en mode fermé, corrige une faille existante
+let failles=[]; // {x,y,vx,vy,r,life,type,char,caught}
+let sparks=[];
+
+const FAILLE_CHARS='!?#@$%^&*<>~`⚡✕⊗⊘◈◉●';
+function randFC(){return FAILLE_CHARS[~~(Math.random()*FAILLE_CHARS.length)];}
+
+function spawnFaille(fromHand){
+  // Depuis la paume de la main ATK, vers le centre ou vers la DEF
+  const target=hands.find(h=>h.role==='def');
+  const tx=target?target.palmX:W/2, ty=target?target.palmY:H/2;
+  const dx=tx-fromHand.palmX,dy=ty-fromHand.palmY;
+  const len=Math.hypot(dx,dy)||1;
+  const spd=3+fromHand.geo.openness*4; // main ouverte → plus rapide
+  failles.push({
+    x:fromHand.palmX,y:fromHand.palmY,
+    vx:(dx/len)*spd+(Math.random()-0.5)*2,
+    vy:(dy/len)*spd+(Math.random()-0.5)*2,
+    r:7+fromHand.geo.openness*8, // main ouverte → plus grosse
+    life:1,type:'faille',char:randFC(),caught:false,
+    birthFrame:frameN,
+  });
+}
+
+function spawnPatch(fromHand){
+  failles.push({
+    x:fromHand.palmX,y:fromHand.palmY,
+    vx:(Math.random()-0.5)*2,vy:-2-Math.random()*2,
+    r:5,life:1,type:'patch',char:'✓',caught:false,
+    birthFrame:frameN,
+  });
+}
+
+function addSparks(x,y,col,n=4){
+  for(let i=0;i<n;i++) sparks.push({
+    x,y,vx:(Math.random()-0.5)*9,vy:-3-Math.random()*5,
+    life:1,ch:rc(),col
+  });
+}
+
+// Détection collision faille ↔ main défense
+function checkFailleCollision(){
+  const defHand=hands.find(h=>h.role==='def');
+  const defShp=defHand?handShapes[defHand.idx]:null;
+
+  for(let i=failles.length-1;i>=0;i--){
+    const f=failles[i];
+    if(f.caught) continue;
+
+    if(f.type==='faille'&&defHand&&defShp){
+      const d=Math.hypot(f.x-defHand.palmX,f.y-defHand.palmY);
+      if(d<defShp.r+f.r){
+        // Interceptée ! +pts DEF
+        scoreDef+=10;
+        integrity=Math.min(100,integrity+5);
+        addSparks(f.x,f.y,COL_DEF,6);
+        termLog(`Faille interceptée → +10 pts défense`,'ok');
+        termLog(`Intégrité restaurée à ${~~integrity}%`,'dim');
+        // Illuminer l'arête touchée
+        const edge=hitHexEdge(defShp,defHand.palmX,defHand.palmY,f.x,f.y);
+        defShp.edgeHit=[edge,1];
+        failles.splice(i,1);
+        continue;
+      }
+      // Faille sort de l'écran → dommage
+      if(f.x<-50||f.x>W+50||f.y<-50||f.y>H+50){
+        scoreAtk+=8;
+        integrity=Math.max(0,integrity-12);
+        termLog(`Faille non interceptée ! −12% intégrité`,'alert');
+        termLog(`Score attaque +8`,'atk');
+        failles.splice(i,1);
+        continue;
+      }
+    }
+
+    if(f.type==='patch'){
+      // Le patch disparaît tout seul après un peu
+      if(frameN-f.birthFrame>90) failles.splice(i,1);
+    }
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+// SUBTILITÉ : CONFLIT si les deux mains font la même chose
+// Main ouverte = action active (ATK lance, DEF bouclier max)
+// Main fermée  = action passive (ATK charge, DEF focus)
+// CONFLIT si les deux ont le même état openness (toutes deux > 0.7 ou < 0.3)
+// ════════════════════════════════════════════════════════════
+let conflictCooldown=0;
+function checkConflict(){
+  if(hands.length<2||conflictCooldown>0) return;
+  const atk=hands.find(h=>h.role==='atk');
+  const def=hands.find(h=>h.role==='def');
+  if(!atk||!def) return;
+  const aBothOpen=atk.geo.openness>0.72&&def.geo.openness>0.72;
+  const aBothClosed=atk.geo.openness<0.25&&def.geo.openness<0.25;
+  if(aBothOpen||aBothClosed){
+    // Contre-attaque système : malus aux deux
+    const penalty=aBothOpen?15:8;
+    integrity=Math.max(0,integrity-penalty);
+    scoreAtk=Math.max(0,scoreAtk-5);
+    scoreDef=Math.max(0,scoreDef-5);
+    conflictCooldown=120;
+    termLog(`⚠ CONFLIT DÉTECTÉ — contre-attaque système !`,'alert');
+    termLog(`Intégrité −${penalty}% · Malus x2`,'alert');
+    // Spawner plusieurs failles d'un coup
+    for(let i=0;i<3;i++){
+      failles.push({
+        x:Math.random()*W,y:-20,
+        vx:(Math.random()-0.5)*4,vy:2+Math.random()*3,
+        r:10,life:1,type:'faille',char:randFC(),caught:false,birthFrame:frameN,
+      });
+    }
+  }
+}
+
+// Spawn automatique de failles (si main ATK active)
+let failleCooldown=0;
+function autoSpawnFailles(){
+  if(failleCooldown>0){failleCooldown--;return;}
+  const atk=hands.find(h=>h.role==='atk');
+  if(!atk||gameState!=='playing') return;
+  // Fréquence selon openness
+  const interval=atk.geo.openness>0.6?45:80;
+  if(frameN%interval===0){
+    spawnFaille(atk);
+    failleCooldown=~~(interval*0.4);
+  }
+}
+
+// Spawn patch si main DEF fermée (< 0.3)
+let patchCooldown=0;
+function autoSpawnPatch(){
+  if(patchCooldown>0){patchCooldown--;return;}
+  const def=hands.find(h=>h.role==='def');
+  if(!def||gameState!=='playing') return;
+  if(def.geo.openness<0.28&&frameN%60===0){
+    spawnPatch(def);
+    patchCooldown=90;
+    termLog(`Patch déployé — correction en cours…`,'def');
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+// TERMINAL — log de jeu
+// ════════════════════════════════════════════════════════════
+const termBody=document.getElementById('t-body');
+const termTitle=document.getElementById('t-title');
+const termDot=document.getElementById('t-dot');
+const termIntegrity=document.getElementById('t-integrity');
+const termState=document.getElementById('t-state');
+const termMeta=document.getElementById('t-meta');
+let termLines=[];
+const TERM_MAX=10;
+
+function termLog(text,type='normal'){
+  let color='rgba(190,190,190,0.75)';
+  let bold=false;
+  if(type==='ok')    {color='#88ffaa';bold=true;}
+  if(type==='alert') {color='#ff5555';bold=true;}
+  if(type==='atk')   {color=COL_ATK;bold=true;}
+  if(type==='def')   {color=COL_DEF;bold=true;}
+  if(type==='dim')   {color='rgba(120,120,120,0.55)';}
+  if(type==='kw')    {color='#ffcc44';bold=true;}
+  const span=document.createElement('span');
+  span.className='t-line';
+  span.style.color=color;
+  if(bold)span.style.fontWeight='bold';
+  span.textContent=text;
+  termBody.appendChild(span);
+  termLines.push(span);
+  while(termLines.length>TERM_MAX){const o=termLines.shift();o?.parentNode?.removeChild(o);}
+}
+
+function updateTerminalUI(){
+  const intPct=~~integrity;
+  const intColor=intPct>60?COL_DEF:intPct>30?'#ffcc44':'#ff4444';
+  termIntegrity.textContent=`INTÉGRITÉ: ${intPct}%`;
+  termIntegrity.style.color=intColor;
+  termDot.style.background=intColor;
+  const el=document.getElementById('terminal');
+  el.className=intPct>50?'secure':'alert';
+  termState.textContent=gameState==='playing'?'EN COURS':gameState==='intro'?'IDLE':'FIN';
+  termMeta.textContent=`Score: ${scoreAtk+scoreDef} pts`;
+}
+
+// ════════════════════════════════════════════════════════════
+// SCORE HUD
+// ════════════════════════════════════════════════════════════
+const scoreAtkEl=document.getElementById('score-atk');
+const scoreDefEl=document.getElementById('score-def');
+const timerEl=document.getElementById('timer');
+const totalEl=document.getElementById('total-score');
+
+function updateScoreHUD(){
+  scoreAtkEl.textContent=scoreAtk;
+  scoreDefEl.textContent=scoreDef;
+  const mm=~~(gameTimer/60),ss=gameTimer%60;
+  timerEl.textContent=`${mm}:${ss.toString().padStart(2,'0')}`;
+  timerEl.style.color=gameTimer<30?'#ff4444':gameTimer<60?'#ffcc44':'#fff';
+  totalEl.textContent=`pts : ${scoreAtk+scoreDef}`;
+}
+
+// ════════════════════════════════════════════════════════════
+// ÉVÉNEMENTS DE JEU
+// ════════════════════════════════════════════════════════════
+let lastHandCount=0;
+function onHandUpdate(){
+  const n=hands.length;
+
+  // Démarrage du jeu si 2 mains détectées et qu'on est en intro
+  if(gameState==='intro'&&n===2){
+    startGame();
+  }
+
+  if(gameState!=='playing') return;
+  conflictCooldown=Math.max(0,conflictCooldown-1);
+  checkConflict();
+
+  // Logs contextuels occasionnels
+  if(frameN%90===0&&n>0){
+    const atk=hands.find(h=>h.role==='atk');
+    const def=hands.find(h=>h.role==='def');
+    if(atk){
+      if(atk.geo.openness>0.7) termLog(`Attaque renforcée — puissance max`,'atk');
+      else if(atk.geo.openness<0.2) termLog(`Attaque en charge…`,'dim');
+    }
+    if(def){
+      if(def.geo.openness>0.7) termLog(`Bouclier actif — zone large`,'def');
+      else if(def.geo.openness<0.2) termLog(`Défense en focus précis`,'def');
+    }
+  }
+
+  lastHandCount=n;
+}
+
+function startGame(){
+  gameState='playing';
+  gameTimer=GAME_DURATION;
+  scoreAtk=0;scoreDef=0;integrity=100;
+  failles=[];sparks=[];
+  document.getElementById('overlay').classList.add('hidden');
+  termLog('=== SESSION DE HACK DÉMARRÉE ===','kw');
+  termLog('Main droite : ATTAQUE · Main gauche : DÉFENSE','dim');
+  termLog('Interceptez les failles pour protéger le système.','dim');
+}
+
+function endGame(){
+  gameState='end';
+  const total=scoreAtk+scoreDef;
+  const winner=scoreAtk>scoreDef?'ATTAQUE':'DÉFENSE';
+  termLog('=== FIN DE SESSION ===','kw');
+  termLog(`Score final : ${total} pts`,'ok');
+  termLog(`Victoire : ${winner} (${Math.max(scoreAtk,scoreDef)} pts)`,'ok');
+  termLog(`Intégrité finale : ${~~integrity}%`,'dim');
+  // Afficher overlay de fin
+  const ov=document.getElementById('overlay');
+  ov.innerHTML=`
+    <h1>FIN DE PARTIE</h1>
+    <h2>Score : ${total} pts</h2>
+    <p style="color:#ffcc44;font-size:14px">Victoire ${winner}<br>${Math.max(scoreAtk,scoreDef)} pts</p>
+    <p>Attaque : ${scoreAtk} · Défense : ${scoreDef}<br>Intégrité finale : ${~~integrity}%</p>
+    <div class="start-hint">Montrez deux mains pour rejouer</div>`;
+  ov.classList.remove('hidden');
+  // Reset pour rejouer
+  setTimeout(()=>{gameState='intro';},3000);
+}
+
+// ════════════════════════════════════════════════════════════
+// STREAMS — update & draw
+// ════════════════════════════════════════════════════════════
+function updStream(s){
+  while(s.chars.length<s.len)s.chars.push(rc());
+  for(let i=0;i<s.chars.length;i++){
+    if(Math.random()<0.3+((1-i/s.chars.length)*0.6))s.chars[i]=rc();
+  }
+  if(s.wordSlot){
+    s.wordSlot.t++;
+    if(s.wordSlot.t%5===0)s.wordSlot.pos=Math.min(s.wordSlot.w.length,s.wordSlot.pos+1);
+    if(s.wordSlot.pos>=s.wordSlot.w.length+6)s.wordSlot=null;
+  } else if(Math.random()<0.003){s.wordSlot={w:randFR(),pos:0,t:0};}
+
+  const hx=s.col*FS+s.dx,hy=~~(s.y)*FS;
+  const rep=repulsion(hx,hy);
+  s.dvx=(s.dvx+rep.dx*0.55)*0.85;
+  s.dvy=(s.dvy+rep.dy*0.40)*0.85;
+  s.dx=s.dx*0.93+s.dvx;s.dy+=s.dvy;
+
+  if(rep.mag>0.9&&Math.random()<0.3){
+    addSparks(hx,hy,rep.nearColor||'#fff',2);
+    if(rep.nearRole){
+      const h=hands.find(h=>h.color===rep.nearColor);
+      const shp=h?handShapes[h.idx]:null;
+      if(h&&shp){const e=hitHexEdge(shp,h.palmX,h.palmY,hx,hy);shp.edgeHit=[e,Math.min(1,(shp.edgeHit[1]||0)+0.5)];}
+    }
+  }
+  s.y+=s.spd*Math.max(0.1,1-Math.abs(s.dvy)*0.3);
+  if(s.y-s.len>rows+2){const ns=mkStream(s.col,false);ns.dx=s.dx;ns.dvx=s.dvx;Object.assign(s,ns);s.chars=[];}
+}
+
+function drawStreams(pal){
+  ctx.font=`${FS}px 'Courier New',monospace`;
+  for(const s of streams){
+    const bx=s.col*FS+s.dx,hue=streamHues[s.col]||0;
+    for(let i=0;i<s.len;i++){
+      const row=~~(s.y)-i;if(row<0||row>rows)continue;
+      const py=row*FS+s.dy,frac=1-i/s.len;
+      let frChar=null;
+      if(s.wordSlot&&i>=1&&i<=s.wordSlot.pos&&i<=s.wordSlot.w.length)frChar=s.wordSlot.w[i-1];
+      let color;ctx.shadowBlur=0;
+      if(frChar){const lum=50+frac*35;color=`hsl(${hue},25%,${lum}%)`;}
+      else if(i===0){
+        let nc=null;
+        for(const z of repZones){if(Math.hypot(bx-z.cx,py-z.cy)<z.r*0.55){nc=z.color;break;}}
+        color=nc||'#ffffff';ctx.shadowColor=nc||`hsl(${hue},80%,70%)`;ctx.shadowBlur=nc?10:5;
+      } else {
+        const a=Math.pow(frac,1.5);color=`hsl(${hue},60%,${(8+a*28)*a}%)`;
+      }
+      ctx.fillStyle=color;ctx.fillText(frChar||(s.chars[i]||rc()),bx,py);
+    }
+    ctx.shadowBlur=0;
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+// FAILLES — draw
+// ════════════════════════════════════════════════════════════
+function updFailles(){
+  for(let i=failles.length-1;i>=0;i--){
+    const f=failles[i];
+    f.x+=f.vx;f.y+=f.vy;
+    // Légère gravité et dérive
+    f.vy+=0.04;
+    f.life-=0.005;
+    if(f.life<=0&&f.type!=='faille'){failles.splice(i,1);continue;}
+    // Changer char aléatoirement
+    if(Math.random()<0.08)f.char=randFC();
+  }
+  checkFailleCollision();
+}
+
+function drawFailles(){
+  for(const f of failles){
+    ctx.save();
+    const col=f.type==='faille'?COL_ATK:COL_DEF;
+    ctx.globalAlpha=Math.min(1,f.life*2);
+    // Cercle de fond
+    ctx.beginPath();ctx.arc(f.x,f.y,f.r,0,Math.PI*2);
+    ctx.fillStyle=col+'22';ctx.fill();
+    ctx.strokeStyle=col+'cc';ctx.lineWidth=1.5;ctx.stroke();
+    // Char central
+    ctx.font=`bold ${~~(f.r*1.3)}px 'Courier New',monospace`;
+    ctx.fillStyle=col;ctx.textAlign='center';
+    ctx.fillText(f.char,f.x,f.y+f.r*0.4);
+    ctx.textAlign='left';
+    ctx.restore();
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+// ÉTINCELLES
+// ════════════════════════════════════════════════════════════
+function updSparks(){
+  for(let i=sparks.length-1;i>=0;i--){
+    const s=sparks[i];s.x+=s.vx;s.y+=s.vy;s.vy+=0.2;s.life-=0.04;
+    if(s.life<=0)sparks.splice(i,1);
+  }
+}
+function drawSparks(){
+  ctx.font=`11px 'Courier New',monospace`;ctx.shadowBlur=0;
+  for(const s of sparks){ctx.globalAlpha=s.life;ctx.fillStyle=s.col;ctx.fillText(s.ch,s.x,s.y);}
+  ctx.globalAlpha=1;
+}
+
+// ════════════════════════════════════════════════════════════
+// BOUCLE PRINCIPALE
+// ════════════════════════════════════════════════════════════
+const fpsEl=document.getElementById('fps')||{textContent:''};
+let lt=0,fc=0,ft=0;
+
+function loop(ts){
+  const dt=ts-lt;lt=ts;fc++;ft+=dt;palCycle++;frameN++;
+
+  if(ft>1000){fpsEl.textContent=Math.round(fc*1000/ft);fc=0;ft=0;}
+
+  // Timer
+  if(gameState==='playing'){
+    if(ts-lastSecTs>1000){lastSecTs=ts;gameTimer--;if(gameTimer<=0)endGame();}
+  }
+
+  palBlend=(palCycle%PAL_DUR)/PAL_DUR;
+  if(palCycle%PAL_DUR===0){curPI=nxtPI;nxtPI=(nxtPI+1)%PALETTES.length;}
+  const pal=getPal();
+
+  // Fond avec rémanence
+  ctx.fillStyle='rgba(0,0,0,0.082)';ctx.fillRect(0,0,W,H);
+  // HUD sans rémanence
+  hud.clearRect(0,0,W,H);
+
+  // Update
+  streams.forEach(updStream);
+  updSparks();
+  if(gameState==='playing'){
+    updFailles();
+    autoSpawnFailles();
+    autoSpawnPatch();
+  }
+
+  // Draw background canvas
+  drawStreams(pal);
+  drawSparks();
+  drawFailles();
+
+  // Draw hud canvas (formes mains)
+  hands.forEach((hand,i)=>drawHandShape(hand,handShapes[i]||handShapes[0]));
+
+  // UI
+  updateScoreHUD();
+  updateTerminalUI();
+
+  requestAnimationFrame(loop);
+}
+
+function resize(){
+  W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight;
+  hudCanvas.width=W;hudCanvas.height=H;
+  initStreams();
+  const term=document.getElementById('terminal');
+  if(term){term.style.left=(W/2-260)+'px';}
+}
+
+window.addEventListener('resize',resize);
+resize();
+requestAnimationFrame(loop);
+window.addEventListener('load',()=>{setTimeout(initHands,600);});
+document.addEventListener('dblclick',()=>{
+  if(!document.fullscreenElement)document.documentElement.requestFullscreen?.();
+  else document.exitFullscreen?.();
+});
+</script>
+</body>
+</html>

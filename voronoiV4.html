@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Voronoï Vivant</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:100%; height:100%; overflow:hidden; background:#000; }
+#main { position:fixed; inset:0; }
+#voronoi { position:absolute; inset:0; width:100%; height:100%; }
+#camCanvas { position:absolute; inset:0; opacity:0; pointer-events:none; }
+#ui {
+  position:fixed; bottom:20px; right:20px; z-index:20;
+  display:flex; gap:10px; align-items:center;
+}
+button {
+  background:rgba(255,255,255,0.1); color:#fff;
+  border:1px solid rgba(255,255,255,0.3); border-radius:8px;
+  padding:8px 16px; font-size:13px; font-family:system-ui,sans-serif;
+  cursor:pointer; backdrop-filter:blur(8px); transition:background 0.2s;
+}
+button:hover { background:rgba(255,255,255,0.22); }
+#camStatus {
+  font-size:12px; color:rgba(255,255,255,0.5);
+  font-family:system-ui,sans-serif;
+}
+</style>
+</head>
+<body>
+<div id="main">
+  <canvas id="voronoi"></canvas>
+  <canvas id="camCanvas"></canvas>
+</div>
+<div id="ui">
+  <span id="camStatus">webcam off</span>
+  <button id="btnCam">⬤ Webcam</button>
+  <button id="btnFS">⛶ Plein écran</button>
+</div>
+
+<script>
+(function(){
+
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+const N = 90;           // seeds (×3 vs original 30)
+const SPEED = 0.4;
+const SKIP = 2;         // render every N frames
+
+// ─── CANVAS SETUP ─────────────────────────────────────────────────────────────
+const vc = document.getElementById('voronoi');
+const ctx = vc.getContext('2d');
+const cc = document.getElementById('camCanvas');
+const camCtx = cc.getContext('2d', { willReadFrequently: true });
+
+let W, H, seeds;
+let camActive = false;
+let video = null;
+let silhouetteData = null;   // Float32Array W×H, 0..1 presence
+let prevFrame = null;        // for background subtraction
+let bgModel = null;          // accumulated background
+
+// ─── INIT ──────────────────────────────────────────────────────────────────────
+function resize() {
+  W = vc.width = window.innerWidth;
+  H = vc.height = window.innerHeight;
+  cc.width = W; cc.height = H;
+  silhouetteData = new Float32Array(W * H);
+  prevFrame = null; bgModel = null;
+}
+
+function init() {
+  resize();
+  seeds = [];
+  for (let i = 0; i < N; i++) {
+    seeds.push({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      vx: (Math.random()-0.5) * SPEED,
+      vy: (Math.random()-0.5) * SPEED,
+      h: Math.random() * 360,
+      dh: (Math.random()-0.5) * 0.25,
+      // base position (drifts slowly)
+      bx: Math.random() * W,
+      by: Math.random() * H,
+    });
+  }
+}
+
+window.addEventListener('resize', () => { resize(); });
+
+// ─── DELAUNAY / VORONOI ────────────────────────────────────────────────────────
+function circumcircle(ax,ay,bx,by,cx,cy) {
+  const D = 2*(ax*(by-cy)+bx*(cy-ay)+cx*(ay-by));
+  if (Math.abs(D) < 1e-10) return null;
+  const a2=ax*ax+ay*ay, b2=bx*bx+by*by, c2=cx*cx+cy*cy;
+  const ux=(a2*(by-cy)+b2*(cy-ay)+c2*(ay-by))/D;
+  const uy=(a2*(cx-bx)+b2*(ax-cx)+c2*(bx-ax))/D;
+  return { x:ux, y:uy, r2:(ax-ux)*(ax-ux)+(ay-uy)*(ay-uy) };
+}
+
+function edgeKey(x1,y1,x2,y2) {
+  const r=v=>Math.round(v*10);
+  const [ax,ay,bx,by] = r(x1)<r(x2)||(r(x1)===r(x2)&&r(y1)<r(y2))
+    ? [r(x1),r(y1),r(x2),r(y2)] : [r(x2),r(y2),r(x1),r(y1)];
+  return `${ax},${ay},${bx},${by}`;
+}
+
+function bowyerWatson(pts) {
+  const M = Math.max(W,H)*12;
+  let tris = [{ax:-M,ay:-M, bx:M*3,by:-M, cx:0,cy:M*3}];
+
+  for (const p of pts) {
+    let bad=[];
+    for (const t of tris) {
+      const c=circumcircle(t.ax,t.ay,t.bx,t.by,t.cx,t.cy);
+      if (!c) continue;
+      const dx=p.x-c.x, dy=p.y-c.y;
+      if (dx*dx+dy*dy < c.r2) bad.push(t);
+    }
+    const poly=[];
+    for (const t of bad) {
+      const es=[[t.ax,t.ay,t.bx,t.by],[t.bx,t.by,t.cx,t.cy],[t.cx,t.cy,t.ax,t.ay]];
+      for (const e of es) {
+        let shared=false;
+        for (const t2 of bad) {
+          if (t2===t) continue;
+          const es2=[[t2.ax,t2.ay,t2.bx,t2.by],[t2.bx,t2.by,t2.cx,t2.cy],[t2.cx,t2.cy,t2.ax,t2.ay]];
+          for (const f of es2) {
+            if ((Math.abs(e[0]-f[0])<0.1&&Math.abs(e[1]-f[1])<0.1&&Math.abs(e[2]-f[2])<0.1&&Math.abs(e[3]-f[3])<0.1)||
+                (Math.abs(e[0]-f[2])<0.1&&Math.abs(e[1]-f[3])<0.1&&Math.abs(e[2]-f[0])<0.1&&Math.abs(e[3]-f[1])<0.1))
+            { shared=true; break; }
+          }
+          if (shared) break;
+        }
+        if (!shared) poly.push(e);
+      }
+    }
+    tris = tris.filter(t=>!bad.includes(t));
+    for (const e of poly) tris.push({ax:e[0],ay:e[1],bx:e[2],by:e[3],cx:p.x,cy:p.y});
+  }
+
+  const SM=Math.max(W,H)*6;
+  return tris.filter(t=>
+    !(Math.abs(t.ax)>SM||Math.abs(t.ay)>SM||Math.abs(t.bx)>SM||Math.abs(t.by)>SM||
+      Math.abs(t.cx)>SM||Math.abs(t.cy)>SM)
+  );
+}
+
+function buildVoronoi(tris) {
+  const ccArr = tris.map(t=>circumcircle(t.ax,t.ay,t.bx,t.by,t.cx,t.cy));
+  const eMap = new Map();
+  for (let i=0;i<tris.length;i++) {
+    const t=tris[i];
+    const es=[[t.ax,t.ay,t.bx,t.by],[t.bx,t.by,t.cx,t.cy],[t.cx,t.cy,t.ax,t.ay]];
+    for (const e of es) {
+      const k=edgeKey(e[0],e[1],e[2],e[3]);
+      if (!eMap.has(k)) eMap.set(k,[]);
+      eMap.get(k).push(i);
+    }
+  }
+  const edges=[], vMap=new Map();
+  for (const [,ts] of eMap) {
+    if (ts.length!==2) continue;
+    const c1=ccArr[ts[0]], c2=ccArr[ts[1]];
+    if (!c1||!c2) continue;
+    const pad=100;
+    if (c1.x<-pad||c1.x>W+pad||c1.y<-pad||c1.y>H+pad) continue;
+    if (c2.x<-pad||c2.x>W+pad||c2.y<-pad||c2.y>H+pad) continue;
+    edges.push([c1.x,c1.y,c2.x,c2.y]);
+    const k1=`${Math.round(c1.x)},${Math.round(c1.y)}`;
+    const k2=`${Math.round(c2.x)},${Math.round(c2.y)}`;
+    if (!vMap.has(k1)) vMap.set(k1,{x:c1.x,y:c1.y});
+    if (!vMap.has(k2)) vMap.set(k2,{x:c2.x,y:c2.y});
+  }
+  return { edges, vertices:[...vMap.values()] };
+}
+
+// ─── SILHOUETTE SAMPLING ────────────────────────────────────────────────────────
+// Returns presence [0..1] at pixel (px,py) from silhouetteData
+function presence(px,py) {
+  if (!silhouetteData) return 0;
+  const ix = Math.max(0,Math.min(W-1,px|0));
+  const iy = Math.max(0,Math.min(H-1,py|0));
+  return silhouetteData[iy*W+ix];
+}
+
+// Sample a region around point, return average presence
+function regionPresence(px,py,r) {
+  if (!camActive) return 0;
+  let sum=0, n=0;
+  const step = Math.max(1, r/4|0);
+  for (let dy=-r;dy<=r;dy+=step) {
+    for (let dx=-r;dx<=r;dx+=step) {
+      sum += presence(px+dx, py+dy);
+      n++;
+    }
+  }
+  return n>0 ? sum/n : 0;
+}
+
+// ─── WEBCAM ────────────────────────────────────────────────────────────────────
+function startWebcam() {
+  if (video) return;
+  video = document.createElement('video');
+  video.autoplay = true; video.muted = true; video.playsInline = true;
+  navigator.mediaDevices.getUserMedia({ video: { width:320, height:240 }, audio:false })
+    .then(stream => {
+      video.srcObject = stream;
+      video.play();
+      camActive = true;
+      document.getElementById('camStatus').textContent = '● webcam on';
+      document.getElementById('camStatus').style.color = 'rgba(100,255,150,0.7)';
+    })
+    .catch(e => {
+      console.warn('webcam:', e);
+      document.getElementById('camStatus').textContent = 'cam denied';
+      video = null;
+    });
+}
+
+function stopWebcam() {
+  if (!video) return;
+  const stream = video.srcObject;
+  if (stream) stream.getTracks().forEach(t=>t.stop());
+  video = null; camActive = false;
+  if (silhouetteData) silhouetteData.fill(0);
+  document.getElementById('camStatus').textContent = 'webcam off';
+  document.getElementById('camStatus').style.color = 'rgba(255,255,255,0.5)';
+}
+
+// Process webcam frame into silhouette (background subtraction + blur)
+function processCam() {
+  if (!video || !camActive || video.readyState < 2) return;
+
+  const VW = video.videoWidth || 320;
+  const VH = video.videoHeight || 240;
+
+  // Draw mirrored video to small offscreen
+  camCtx.save();
+  camCtx.scale(-1,1);
+  camCtx.drawImage(video, -VW,0, VW,VH);
+  camCtx.restore();
+
+  const raw = camCtx.getImageData(0,0,VW,VH).data;
+  const size = VW*VH;
+
+  // Init background model
+  if (!bgModel || bgModel.length !== size*3) {
+    bgModel = new Float32Array(size*3);
+    for (let i=0;i<size;i++) {
+      bgModel[i*3]   = raw[i*4];
+      bgModel[i*3+1] = raw[i*4+1];
+      bgModel[i*3+2] = raw[i*4+2];
+    }
+    return;
+  }
+
+  // Compute diff mask
+  const mask = new Float32Array(size);
+  for (let i=0;i<size;i++) {
+    const dr = raw[i*4]   - bgModel[i*3];
+    const dg = raw[i*4+1] - bgModel[i*3+1];
+    const db = raw[i*4+2] - bgModel[i*3+2];
+    const diff = Math.sqrt(dr*dr+dg*dg+db*db)/441; // normalize 0..1
+    mask[i] = diff > 0.12 ? Math.min(1, (diff-0.12)*5) : 0;
+    // Slow background update where no motion
+    if (mask[i] < 0.1) {
+      bgModel[i*3]   += (raw[i*4]   - bgModel[i*3])   * 0.02;
+      bgModel[i*3+1] += (raw[i*4+1] - bgModel[i*3+1]) * 0.02;
+      bgModel[i*3+2] += (raw[i*4+2] - bgModel[i*3+2]) * 0.02;
+    }
+  }
+
+  // Scale mask up to screen size with bilinear approx
+  const scaleX = W/VW, scaleY = H/VH;
+  for (let sy=0;sy<H;sy++) {
+    for (let sx=0;sx<W;sx++) {
+      const vx = Math.min(VW-1, (sx/scaleX)|0);
+      const vy = Math.min(VH-1, (sy/scaleY)|0);
+      silhouetteData[sy*W+sx] = mask[vy*VW+vx];
+    }
+  }
+}
+
+// ─── UPDATE ────────────────────────────────────────────────────────────────────
+function update() {
+  for (let k=0;k<N;k++) {
+    const s=seeds[k];
+
+    // Check silhouette near seed
+    const pres = regionPresence(s.x, s.y, 40);
+
+    // Silhouette repels seeds + shifts hue
+    if (pres > 0.1) {
+      // Push seed away from dense silhouette area toward edge
+      const angle = Math.atan2(s.y - H/2, s.x - W/2);
+      s.vx += Math.cos(angle) * pres * 0.3;
+      s.vy += Math.sin(angle) * pres * 0.3;
+      // Boost hue drift in silhouette zones
+      s.h = (s.h + pres * 3 + s.dh + 360) % 360;
+    } else {
+      s.h = (s.h + s.dh + 360) % 360;
+    }
+
+    // Dampen velocity
+    s.vx *= 0.995;
+    s.vy *= 0.995;
+
+    s.x += s.vx; s.y += s.vy;
+    if (s.x<0){s.x=0;s.vx*=-1;}
+    if (s.x>W){s.x=W;s.vx*=-1;}
+    if (s.y<0){s.y=0;s.vy*=-1;}
+    if (s.y>H){s.y=H;s.vy*=-1;}
+  }
+}
+
+// ─── DRAW ──────────────────────────────────────────────────────────────────────
+function nearestHue(x,y) {
+  let minD=1e18, best=0;
+  for (let k=0;k<N;k++){
+    const dx=x-seeds[k].x, dy=y-seeds[k].y;
+    const d=dx*dx+dy*dy;
+    if (d<minD){minD=d;best=k;}
+  }
+  return seeds[best].h;
+}
+
+function draw() {
+  ctx.clearRect(0,0,W,H);
+
+  const tris = bowyerWatson(seeds);
+  const {edges, vertices} = buildVoronoi(tris);
+
+  // Draw edges
+  for (const [x1,y1,x2,y2] of edges) {
+    const mx=(x1+x2)/2, my=(y1+y2)/2;
+    const hue = nearestHue(mx,my);
+    const pres = regionPresence(mx,my,20);
+    // Silhouette brightens and thickens edges
+    const alpha = 0.4 + pres*0.5;
+    const lum = 55 + pres*30;
+    ctx.strokeStyle = `hsla(${hue|0},65%,${lum|0}%,${alpha.toFixed(2)})`;
+    ctx.lineWidth = 0.7 + pres*1.5;
+    ctx.beginPath();
+    ctx.moveTo(x1,y1);
+    ctx.lineTo(x2,y2);
+    ctx.stroke();
+  }
+
+  // Draw only Voronoi vertices (true intersections)
+  for (const v of vertices) {
+    if (v.x<-5||v.x>W+5||v.y<-5||v.y>H+5) continue;
+    const hue = nearestHue(v.x,v.y);
+    const pres = regionPresence(v.x,v.y,15);
+    const r = 1.6 + pres*3;
+    const alpha = 0.7 + pres*0.3;
+    const lum = 70 + pres*25;
+    ctx.beginPath();
+    ctx.arc(v.x,v.y,r,0,Math.PI*2);
+    ctx.fillStyle = `hsla(${hue|0},80%,${lum|0}%,${alpha.toFixed(2)})`;
+    ctx.fill();
+  }
+}
+
+// ─── LOOP ──────────────────────────────────────────────────────────────────────
+let frame=0;
+function loop() {
+  frame++;
+  if (frame%3===0) processCam();
+  update();
+  if (frame%SKIP===0) draw();
+  requestAnimationFrame(loop);
+}
+
+// ─── CONTROLS ──────────────────────────────────────────────────────────────────
+document.getElementById('btnCam').addEventListener('click',()=>{
+  if (camActive) stopWebcam(); else startWebcam();
+});
+
+document.getElementById('btnFS').addEventListener('click',()=>{
+  if (!document.fullscreenElement)
+    document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen();
+  else document.exitFullscreen&&document.exitFullscreen();
+});
+
+window.addEventListener('resize', resize);
+
+// ─── START ─────────────────────────────────────────────────────────────────────
+init();
+requestAnimationFrame(loop);
+
+})();
+</script>
+</body>
+</html>

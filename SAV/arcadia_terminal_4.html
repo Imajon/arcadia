@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ARCADIA — 9 MAI</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; background:#000; overflow:hidden;
+  font-family:'Courier New','Lucida Console',monospace; cursor:none; }
+
+canvas#bg { position:fixed; top:0; left:0; width:100%; height:100%; z-index:0; }
+
+#scanline {
+  position:fixed; top:0; left:0; width:100%; height:100%; z-index:2; pointer-events:none;
+  background:repeating-linear-gradient(to bottom,transparent 0,transparent 2px,rgba(0,0,0,0.06) 2px,rgba(0,0,0,0.06) 4px);
+}
+#vignette {
+  position:fixed; top:0; left:0; width:100%; height:100%; z-index:3; pointer-events:none;
+  background:radial-gradient(ellipse at center,transparent 42%,rgba(0,0,0,0.88) 100%);
+}
+
+/* ══ TERMINAUX ════════════════════════════════════════════ */
+.terminal {
+  position:fixed; z-index:8; pointer-events:none;
+  width:300px;
+  font-family:'Courier New',monospace;
+  border:1px solid rgba(255,255,255,0.07);
+  background:rgba(4,4,6,0.82);
+  backdrop-filter:blur(3px);
+  overflow:hidden;
+  transition:border-color 0.5s, box-shadow 0.5s;
+}
+.terminal.active {
+  border-color:rgba(255,255,255,0.18);
+  box-shadow:0 0 18px rgba(0,0,0,0.6);
+}
+
+.term-header {
+  display:flex; align-items:center; gap:7px;
+  padding:6px 11px;
+  border-bottom:1px solid rgba(255,255,255,0.05);
+  background:rgba(255,255,255,0.025);
+  font-size:9px; letter-spacing:0.18em; color:rgba(255,255,255,0.3);
+  text-transform:uppercase; user-select:none;
+}
+.term-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+.term-title { flex:1; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+
+.term-body {
+  padding:7px 11px 9px;
+  min-height:155px; max-height:210px;
+  overflow:hidden;
+  display:flex; flex-direction:column; justify-content:flex-end;
+  gap:1px;
+}
+
+.term-line {
+  white-space:pre; margin:0; line-height:1.5;
+  opacity:0; font-size:10.5px;
+  animation:tli 0.12s ease forwards;
+}
+@keyframes tli { from{opacity:0;transform:translateX(-3px)} to{opacity:1;transform:none} }
+
+.term-footer {
+  padding:4px 11px;
+  border-top:1px solid rgba(255,255,255,0.04);
+  font-size:9px; color:rgba(255,255,255,0.18); letter-spacing:0.1em;
+  display:flex; justify-content:space-between;
+}
+
+/* ══ HUD ════════════════════════════════════════════════ */
+#statusbar { position:fixed; bottom:16px; left:24px; z-index:10; font-size:9.5px; letter-spacing:0.12em; opacity:0.3; color:#fff; text-transform:uppercase; }
+#clock     { position:fixed; top:18px; right:24px; z-index:10; font-size:10px; letter-spacing:0.2em; opacity:0.3; color:#fff; }
+#corner-tl { position:fixed; top:16px; left:20px; z-index:10; font-size:9.5px; letter-spacing:0.15em; opacity:0.22; color:#fff; text-transform:uppercase; }
+#webcam    { position:fixed; top:-9999px; left:-9999px; width:320px; height:240px; }
+#camstatus { position:fixed; bottom:16px; right:24px; z-index:10; font-size:9px; letter-spacing:0.1em; opacity:0.38; color:#fff; text-transform:uppercase; }
+#camstatus.active { color:#00ff9d; opacity:0.6; }
+#camstatus.error  { color:#ff4444; opacity:0.6; }
+</style>
+</head>
+<body>
+
+<canvas id="bg"></canvas>
+<video id="webcam" autoplay muted playsinline></video>
+
+<!-- Terminal A — quadrant haut-gauche -->
+<div class="terminal" id="term-a">
+  <div class="term-header">
+    <span class="term-dot" id="dot-a" style="background:#00e5ff"></span>
+    <span class="term-title" id="term-a-title">NODE A — en attente</span>
+  </div>
+  <div class="term-body" id="term-a-body">
+    <span class="term-line" style="opacity:0.3;color:rgba(180,180,180,0.5);font-size:10px">Système prêt. Approchez une main.</span>
+  </div>
+  <div class="term-footer">
+    <span id="term-a-state">IDLE</span><span id="term-a-meta">—</span>
+  </div>
+</div>
+
+<!-- Terminal B — quadrant bas-droite -->
+<div class="terminal" id="term-b">
+  <div class="term-header">
+    <span class="term-dot" id="dot-b" style="background:#ff6600"></span>
+    <span class="term-title" id="term-b-title">NODE B — en attente</span>
+  </div>
+  <div class="term-body" id="term-b-body">
+    <span class="term-line" style="opacity:0.3;color:rgba(180,180,180,0.5);font-size:10px">Système prêt. Approchez une main.</span>
+  </div>
+  <div class="term-footer">
+    <span id="term-b-state">IDLE</span><span id="term-b-meta">—</span>
+  </div>
+</div>
+
+<div id="scanline"></div>
+<div id="vignette"></div>
+<div id="statusbar">ARCADIA v5 — <span id="fps">--</span> fps — 9 MAI</div>
+<div id="clock"></div>
+<div id="corner-tl">Studio EYA</div>
+<div id="camstatus">CAM : initialisation…</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script>
+// ══════════════════════════════════════════════════════════════
+// CANVAS
+// ══════════════════════════════════════════════════════════════
+const canvas = document.getElementById('bg');
+const ctx    = canvas.getContext('2d');
+let W, H;
+
+// ══════════════════════════════════════════════════════════════
+// MOTS-CLÉS
+// ══════════════════════════════════════════════════════════════
+const KEYWORDS = [
+  { text:'9 MAI',             weight:4 },
+  { text:'ARCADIA',           weight:5 },
+  { text:'ART NUMÉRIQUE',     weight:3 },
+  { text:'RÉALITÉ VIRTUELLE', weight:3 },
+  { text:'ARCADE',            weight:4 },
+  { text:'IMMERSIVE',         weight:4 },
+];
+const KW_SET = new Set(KEYWORDS.map(k=>k.text));
+function randKW(){ const p=[]; KEYWORDS.forEach(k=>{for(let i=0;i<k.weight;i++) p.push(k.text);}); return p[Math.floor(Math.random()*p.length)]; }
+
+// ══════════════════════════════════════════════════════════════
+// PALETTES
+// ══════════════════════════════════════════════════════════════
+const PALETTES=[
+  {base:'#00ff9d',accent:'#00d4ff',key:'#ff00c8'},
+  {base:'#ff7700',accent:'#ffcc00',key:'#ff0055'},
+  {base:'#cc44ff',accent:'#9955ff',key:'#00ffcc'},
+  {base:'#44d9ff',accent:'#dddddd',key:'#ff6688'},
+  {base:'#aaff00',accent:'#00ff99',key:'#ff4444'},
+];
+let curPI=0,nxtPI=1,palBlend=0,palCycle=0;
+const PAL_DUR=2400;
+
+function lerpHex(a,b,t){
+  const ah=parseInt(a.slice(1,7),16),bh=parseInt(b.slice(1,7),16);
+  const ar=(ah>>16)&255,ag=(ah>>8)&255,ab=ah&255;
+  const br=(bh>>16)&255,bg=(bh>>8)&255,bb=bh&255;
+  return '#'+[ar+(br-ar)*t,ag+(bg-ag)*t,ab+(bb-ab)*t].map(v=>Math.round(v).toString(16).padStart(2,'0')).join('');
+}
+function getPal(){
+  const a=PALETTES[curPI],b=PALETTES[nxtPI],t=palBlend;
+  return {base:lerpHex(a.base,b.base,t),accent:lerpHex(a.accent,b.accent,t),key:lerpHex(a.key,b.key,t)};
+}
+
+// ══════════════════════════════════════════════════════════════
+// STREAMS — couleur par colonne (angle d'or HSL)
+// ══════════════════════════════════════════════════════════════
+const FS=14;
+let cols,rows,streams=[];
+let streamHues=[];
+
+function initStreamColors(n){ streamHues=[]; for(let c=0;c<n;c++) streamHues.push((c*137.508)%360); }
+
+const CL='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%&*()_+-=[]{}|;:,.<>?/~`\\';
+const CJ='アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン';
+const CS='░▒▓│┤╣║╗╝┐└┴┬├─┼╚╔╩╦╠═╬┘┌';
+function rc(){const r=Math.random();if(r<0.5)return CL[~~(r*2*CL.length)%CL.length];if(r<0.8)return CJ[~~(Math.random()*CJ.length)];return CS[~~(Math.random()*CS.length)];}
+
+function mkStream(col,rand){
+  const len=6+~~(Math.random()*22),spd=0.4+Math.random()*1.2;
+  const y=rand?Math.random()*-rows:-len;
+  let kw=null; if(Math.random()<0.09){kw=randKW();}
+  // Probabilité d'avoir un mot français
+  const wordSlot = Math.random()<0.12 ? mkWordSlot() : null;
+  return {col,y,len,spd,chars:[],kw,kwp:0,glitch:0,dvx:0,dvy:0,dx:0,dy:0,wordSlot,wordTimer:0};
+}
+function initStreams(){
+  cols=~~(W/FS); rows=~~(H/FS);
+  initStreamColors(cols);
+  streams=[];
+  for(let c=0;c<cols;c++) streams.push(mkStream(c,true));
+}
+
+// ══════════════════════════════════════════════════════════════
+// DÉTECTION DE MAINS
+// ══════════════════════════════════════════════════════════════
+const HAND_COLORS=['#00e5ff','#ff6600'];
+const HAND_R=115, REP_FORCE=4.5, DEF_DECAY=0.85;
+const ALL_LM=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20];
+const TIP_LM=[4,8,12,16,20];
+
+let hands=[];
+let handPoints=[];
+
+const camEl=document.getElementById('webcam');
+const camSt=document.getElementById('camstatus');
+
+// ── Mesures géométriques de la main ──────────────────────────
+// Retourne {openness, rotation, spread} pour une main (landmarks bruts)
+function analyzeHand(lms){
+  // openness : distance moyenne bout doigt / base doigt (0=fermé, 1=ouvert)
+  const fingerPairs=[[4,2],[8,6],[12,10],[16,14],[20,18]];
+  let totalOpen=0;
+  const palmBase=lms[0]; // poignet
+  const palmMid =lms[9]; // milieu paume
+  const palmSpan=Math.hypot(palmBase.x-palmMid.x,palmBase.y-palmMid.y)*Math.sqrt(W*W+H*H);
+
+  fingerPairs.forEach(([tip,base])=>{
+    const t=lms[tip],b=lms[base];
+    const d=Math.hypot(t.x-b.x,t.y-b.y)*Math.sqrt(W*W+H*H);
+    // Normaliser par la distance poignet-paume
+    totalOpen+=Math.min(1,d/(palmSpan*0.9||1));
+  });
+  const openness=Math.min(1,totalOpen/5);
+
+  // rotation : angle de la main (vecteur poignet→majeur base)
+  const wrist=lms[0],midBase=lms[9];
+  const rotation=Math.atan2(
+    (midBase.y-wrist.y)*H,
+    (1-midBase.x-(1-wrist.x))*W
+  );
+
+  // spread : distance entre pouce et auriculaire
+  const thumb=lms[4],pinky=lms[20];
+  const spread=Math.hypot((thumb.x-pinky.x)*W,(thumb.y-pinky.y)*H);
+
+  return {openness,rotation,spread};
+}
+
+function initHands(){
+  if(!navigator.mediaDevices||!window.Hands){
+    camSt.textContent='Webcam non disponible'; camSt.classList.add('error'); return;
+  }
+  const mp=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+  mp.setOptions({maxNumHands:2,modelComplexity:0,minDetectionConfidence:0.65,minTrackingConfidence:0.5});
+
+  mp.onResults(res=>{
+    hands=[]; handPoints=[];
+    if(!res.multiHandLandmarks) return;
+    res.multiHandLandmarks.forEach((lms,hi)=>{
+      const color=HAND_COLORS[hi%2];
+      const palm=lms[9];
+      const palmX=(1-palm.x)*W, palmY=palm.y*H;
+      const pts=ALL_LM.map(idx=>({ x:(1-lms[idx].x)*W, y:lms[idx].y*H }));
+      const tips=TIP_LM.map(idx=>({ x:(1-lms[idx].x)*W, y:lms[idx].y*H }));
+      const geo=analyzeHand(lms);
+      hands.push({pts,tips,color,palmX,palmY,idx:hi,geo,lms});
+      // UN SEUL point de répulsion : centré sur la paume, rayon = forme hexagonale courante
+      // Le rayon sera mis à jour dynamiquement via handShapes[hi].r
+      handPoints.push({x:palmX,y:palmY,r:HAND_R,color,handIdx:hi,shapeIdx:hi});
+    });
+    onHandActivity();
+  });
+
+  const cam=new Camera(camEl,{onFrame:async()=>{await mp.send({image:camEl});},width:320,height:240});
+  cam.start()
+    .then(()=>{camSt.textContent='Détection des mains active';camSt.classList.add('active');})
+    .catch(()=>{camSt.textContent='Accès caméra refusé';camSt.classList.add('error');});
+}
+
+function repulsion(px,py){
+  let dx=0,dy=0,nearColor=null,maxF=0;
+  for(const hp of handPoints){
+    const ex=px-hp.x,ey=py-hp.y,d=Math.hypot(ex,ey);
+    if(d<hp.r&&d>1){
+      const f=REP_FORCE*Math.pow(1-d/hp.r,2);
+      dx+=(ex/d)*f; dy+=(ey/d)*f;
+      if(f>maxF){maxF=f;nearColor=hp.color;}
+    }
+  }
+  return {dx,dy,nearColor,mag:Math.hypot(dx,dy)};
+}
+
+// ══════════════════════════════════════════════════════════════
+// FORME INTERACTIVE AUTOUR DE LA MAIN
+// ══════════════════════════════════════════════════════════════
+// La forme est un polygone régulier dont :
+//   - le rayon  = fonction de l'ouverture (main ouverte → grand cercle, fermée → petit)
+//   - la rotation = orientation de la main
+//   - le nombre de côtés = fixé à 6 (hexagone), lisible et net
+//   - l'opacité des segments varie selon l'activité
+
+// Paramètres interpolés (smooth) pour chaque main
+const handShapes=[
+  {r:60,rot:0,openness:0,spread:0,phase:0},
+  {r:60,rot:0,openness:0,spread:0,phase:Math.PI/6},
+];
+
+const SHAPE_SIDES=6;
+const SHAPE_R_MIN=45;
+const SHAPE_R_MAX=130;
+
+function drawHandShape(hand, shp, pal){
+  const cx=hand.palmX, cy=hand.palmY;
+  const geo=hand.geo;
+  const col=hand.color;
+  shp.phase+=0.025;
+
+  // Interpolation douce des paramètres
+  const targetR=SHAPE_R_MIN+(SHAPE_R_MAX-SHAPE_R_MIN)*geo.openness;
+  shp.r+=(targetR-shp.r)*0.12;
+  shp.rot+=(geo.rotation-shp.rot)*0.10;
+  shp.openness+=(geo.openness-shp.openness)*0.12;
+
+  const n=SHAPE_SIDES;
+  const r=shp.r;
+  const rot=shp.rot;
+  const open=shp.openness;
+
+  ctx.save();
+  ctx.translate(cx,cy);
+  ctx.rotate(rot);
+
+  // ── 1. Polygone principal ──────────────────────────────────
+  ctx.beginPath();
+  for(let i=0;i<=n;i++){
+    const a=(i/n)*Math.PI*2 - Math.PI/2;
+    // Déformation légère selon ouverture (ellipse orientée)
+    const rx=r*(0.85+0.15*open);
+    const ry=r*(1.15-0.15*open);
+    const x=Math.cos(a)*rx, y=Math.sin(a)*ry;
+    i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+  }
+  ctx.closePath();
+  ctx.strokeStyle=col+'cc';
+  ctx.lineWidth=1.2;
+  ctx.shadowBlur=0;
+  ctx.stroke();
+
+  // ── 2. Segments internes (parlent de l'état) ────────────────
+  // Arcs tournants — vitesse liée à l'ouverture
+  const arcSpeed=0.5+open*2;
+  const arcPhase=shp.phase*arcSpeed;
+
+  // Arc extérieur court (tiers du périmètre)
+  ctx.beginPath();
+  ctx.arc(0,0,r*1.08, arcPhase, arcPhase+Math.PI*(0.3+open*0.5));
+  ctx.strokeStyle=col+'88';
+  ctx.lineWidth=1;
+  ctx.stroke();
+
+  // Arc intérieur inversé
+  ctx.beginPath();
+  ctx.arc(0,0,r*0.92,-arcPhase,-arcPhase-Math.PI*(0.2+open*0.4));
+  ctx.strokeStyle=col+'55';
+  ctx.lineWidth=1;
+  ctx.stroke();
+
+  // ── 3. Lignes de construction (réticule) ───────────────────
+  // Croix légère centrée
+  const crossLen=r*0.18;
+  ctx.strokeStyle=col+'44';
+  ctx.lineWidth=0.8;
+  ctx.beginPath(); ctx.moveTo(-crossLen,0); ctx.lineTo(crossLen,0); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0,-crossLen); ctx.lineTo(0,crossLen); ctx.stroke();
+
+  // ── 4. Marques d'angle (coins du polygone) ─────────────────
+  for(let i=0;i<n;i++){
+    const a=(i/n)*Math.PI*2 - Math.PI/2;
+    const rx=r*(0.85+0.15*open), ry=r*(1.15-0.15*open);
+    const x=Math.cos(a)*rx, y=Math.sin(a)*ry;
+    // Petit tick au coin
+    const nx=Math.cos(a)*0.12, ny=Math.sin(a)*0.12;
+    ctx.strokeStyle=col+(i%2===0?'cc':'55');
+    ctx.lineWidth=1.2;
+    ctx.beginPath();
+    ctx.moveTo(x-nx*8,y-ny*8);
+    ctx.lineTo(x+nx*8,y+ny*8);
+    ctx.stroke();
+  }
+
+  // ── 5. Indicateur d'ouverture — barre de progression ───────
+  // Petit arc de progression à l'intérieur
+  ctx.beginPath();
+  ctx.arc(0,0,r*0.55, -Math.PI/2, -Math.PI/2+Math.PI*2*open);
+  ctx.strokeStyle=col+(open>0.6?'ff':'88');
+  ctx.lineWidth=1.5;
+  ctx.stroke();
+
+  // ── 6. Valeur numérique (openness en %)  ───────────────────
+  ctx.font=`bold 9px 'Courier New',monospace`;
+  ctx.fillStyle=col+'cc';
+  ctx.textAlign='center';
+  ctx.fillText(`${~~(open*100)}%`, 0, r*0.55+14);
+  ctx.textAlign='left';
+
+  // ── 7. Label rotation ─────────────────────────────────────
+  const rotDeg=~~(geo.rotation*180/Math.PI);
+  ctx.font=`8px 'Courier New',monospace`;
+  ctx.fillStyle=col+'88';
+  ctx.textAlign='center';
+  ctx.fillText(`${rotDeg}°`, r*1.25, 4);
+  ctx.textAlign='left';
+
+  ctx.restore();
+
+  // ── 8. Points visibles sur TOUS les landmarks (détection) ──
+  // Distincts de la répulsion — juste visuels
+  hand.pts.forEach((pt,ii)=>{
+    const isTip=(ii===2||ii===4||ii===6||ii===8||ii===10); // bouts de doigts
+    ctx.beginPath();
+    ctx.arc(pt.x,pt.y,isTip?3:1.5,0,Math.PI*2);
+    ctx.fillStyle=isTip ? col+'ee' : col+'55';
+    ctx.fill();
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+// TERMINAUX — contenu humain, cohérent, lisible
+// ══════════════════════════════════════════════════════════════
+
+// Couleurs dans les terminaux
+const TC = {
+  dim:    'rgba(120,120,120,0.55)',  // commentaires, données secondaires
+  normal: 'rgba(195,195,195,0.80)',  // texte courant
+  accent: null,                       // couleur de la main (définie par terminal)
+  white:  '#ffffff',                  // lignes importantes
+  kw:     null,                       // mot-clé (défini dynamiquement)
+};
+
+// Définition des terminaux
+const TERMS=[
+  {id:'term-a',bodyId:'term-a-body',titleId:'term-a-title',stateId:'term-a-state',metaId:'term-a-meta',
+   dotId:'dot-a',color:'#00e5ff',handIdx:0,label:'NODE A',lines:[]},
+  {id:'term-b',bodyId:'term-b-body',titleId:'term-b-title',stateId:'term-b-state',metaId:'term-b-meta',
+   dotId:'dot-b',color:'#ff6600',handIdx:1,label:'NODE B',lines:[]},
+];
+const MAX_LINES=11;
+
+// Ajouter une ligne dans un terminal
+function pushLine(td, text, type='normal'){
+  const body=document.getElementById(td.bodyId);
+  if(!body) return;
+  let color=TC.normal;
+  let bold=false, italic=false;
+  switch(type){
+    case 'kw':    color=td.color; bold=true;   break;
+    case 'action':color='#ffffff'; bold=true;  break;
+    case 'dim':   color=TC.dim;                break;
+    case 'ok':    color='#88ff88'; bold=true;  break;
+    case 'warn':  color='#ffcc44'; break;
+    case 'sep':   color='rgba(255,255,255,0.1)'; break;
+    case 'value': color=td.color; break;
+  }
+  const span=document.createElement('span');
+  span.className='term-line';
+  span.style.color=color;
+  if(bold) span.style.fontWeight='bold';
+  span.textContent=text;
+  body.appendChild(span);
+  td.lines.push(span);
+  while(td.lines.length>MAX_LINES){const o=td.lines.shift();o?.parentNode?.removeChild(o);}
+}
+
+function setTermStatus(td, title, state, meta){
+  const t=document.getElementById(td.titleId); if(t) t.textContent=title;
+  const s=document.getElementById(td.stateId); if(s) s.textContent=state;
+  const m=document.getElementById(td.metaId);  if(m) m.textContent=meta||'';
+  const el=document.getElementById(td.id);
+  if(el) el.classList.toggle('active', state!=='IDLE');
+}
+
+// ── Contenu humain et cohérent selon l'état de la main ───────
+
+// Séquences de démarrage (main apparaît)
+function seqHandAppear(td, geo){
+  const open=~~(geo.openness*100);
+  pushLine(td,'','dim');
+  pushLine(td,`Main détectée — position stabilisée`,'normal');
+  pushLine(td,`  Ouverture : ${open}%  |  Rotation : ${~~(geo.rotation*180/Math.PI)}°`,'dim');
+  pushLine(td,`  Envergure : ${~~geo.spread} px`,'dim');
+}
+
+// Séquences selon ouverture (appelées périodiquement)
+function seqOpenness(td, geo){
+  const open=geo.openness;
+  const pct=~~(open*100);
+  if(open>0.8){
+    pushLine(td,`Main ouverte (${pct}%) — rayonnement max`,'value');
+    pushLine(td,`  Flux de données : amplifié`,'dim');
+    pushLine(td,`  ${randKW()}`,'kw');
+  } else if(open>0.5){
+    pushLine(td,`Main semi-ouverte (${pct}%)`,'normal');
+    pushLine(td,`  Calibrage en cours…`,'dim');
+  } else if(open>0.2){
+    pushLine(td,`Main partiellement fermée (${pct}%)`,'normal');
+    pushLine(td,`  Signal réduit — compression active`,'dim');
+  } else {
+    pushLine(td,`Main fermée (${pct}%) — mode focus`,'warn');
+    pushLine(td,`  ${randKW()}`,'kw');
+    pushLine(td,`  Densité maximale`,'dim');
+  }
+}
+
+// Séquence rotation
+function seqRotation(td, geo){
+  const deg=~~(geo.rotation*180/Math.PI);
+  if(Math.abs(deg)>60){
+    pushLine(td,`Rotation détectée : ${deg}°`,'warn');
+    pushLine(td,`  Réorientation du vecteur…`,'dim');
+  } else {
+    pushLine(td,`Angle : ${deg}° — axe stable`,'dim');
+  }
+}
+
+// Séquence pont (deux mains)
+function seqBridge(td, otherColor){
+  pushLine(td,'','sep');
+  pushLine(td,'Pont inter-nodal établi','action');
+  pushLine(td,'  Transfert bidirectionnel actif','normal');
+  pushLine(td,`  ${randKW()}  ↔  ${randKW()}`,'kw');
+  pushLine(td,'  Synchronisation…','dim');
+}
+
+// Séquence déconnexion
+function seqDisconnect(td){
+  pushLine(td,'Signal perdu — main hors champ','warn');
+  pushLine(td,'  Mise en veille du nœud…','dim');
+}
+
+// Séquence activité continue (fond)
+function seqIdle(td, geo){
+  const msgs=[
+    ()=>pushLine(td,`  ${randKW()} — en attente`,'dim'),
+    ()=>pushLine(td,`  Analyse environnement…`,'dim'),
+    ()=>{ pushLine(td,`Événement : ${randKW()}`,'kw'); },
+    ()=>pushLine(td,`  Latence : ${(Math.random()*4+0.5).toFixed(1)} ms`,'dim'),
+    ()=>pushLine(td,`  Nœud actif — aucune action`,'normal'),
+  ];
+  msgs[~~(Math.random()*msgs.length)]();
+}
+
+// État de chaque terminal
+const tState=[
+  {active:false,seq:null,seqStep:0,seqTimer:0,idleTimer:0,prevOpen:-1,prevRot:0,bridged:false},
+  {active:false,seq:null,seqStep:0,seqTimer:0,idleTimer:0,prevOpen:-1,prevRot:0,bridged:false},
+];
+let lastHandCount=0;
+let frameN=0;
+
+function onHandActivity(){
+  const n=hands.length;
+  hands.forEach(hand=>{
+    const i=hand.idx;
+    const td=TERMS[i], ts=tState[i];
+    const geo=hand.geo;
+    // Apparition d'une nouvelle main
+    if(!ts.active){
+      ts.active=true;
+      setTermStatus(td,`${td.label} — main détectée`,'ACTIF',`ouv. ${~~(geo.openness*100)}%`);
+      seqHandAppear(td,geo);
+      ts.prevOpen=geo.openness;
+      ts.prevRot=geo.rotation;
+    }
+    // Changement significatif d'ouverture (>10%)
+    if(Math.abs(geo.openness-ts.prevOpen)>0.10){
+      seqOpenness(td,geo);
+      ts.prevOpen=geo.openness;
+      setTermStatus(td,`${td.label} — main active`,'ACTIF',`ouv. ${~~(geo.openness*100)}%`);
+    }
+    // Changement de rotation (>15°)
+    if(Math.abs(geo.rotation-ts.prevRot)>0.26){
+      seqRotation(td,geo);
+      ts.prevRot=geo.rotation;
+    }
+  });
+
+  // Pont inter-mains
+  if(n===2&&lastHandCount<2){
+    TERMS.forEach((td,i)=>{ if(!tState[i].bridged){ seqBridge(td,HAND_COLORS[1-i]); tState[i].bridged=true; }});
+  }
+  if(n<2&&lastHandCount===2){
+    TERMS.forEach((td,i)=>{tState[i].bridged=false;});
+  }
+
+  // Déconnexion
+  if(n<lastHandCount){
+    for(let i=0;i<2;i++){
+      if(!hands.some(h=>h.idx===i)&&tState[i].active){
+        tState[i].active=false;
+        seqDisconnect(TERMS[i]);
+        setTermStatus(TERMS[i],`${TERMS[i].label} — en attente`,'IDLE','—');
+      }
+    }
+  }
+  lastHandCount=n;
+}
+
+function updTerminals(){
+  frameN++;
+  TERMS.forEach((td,i)=>{
+    const ts=tState[i];
+    const hand=hands.find(h=>h.idx===i);
+    // Activité de fond si main active mais rien de nouveau
+    if(ts.active&&hand&&frameN%(55+i*13)===0){
+      seqIdle(td,hand.geo);
+      setTermStatus(td,`${td.label} — main active`,'ACTIF',`ouv. ${~~(hand.geo.openness*100)}%`);
+    }
+    // Seed auto si jamais actif
+    if(frameN===80+i*40&&!ts.active){
+      pushLine(td,'Système prêt.','dim');
+      pushLine(td,'Approchez une main pour commencer.','dim');
+    }
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+// ÉTINCELLES
+// ══════════════════════════════════════════════════════════════
+let sparks=[];
+function addSparks(x,y,color,n=2){
+  for(let i=0;i<n;i++) sparks.push({x,y,vx:(Math.random()-0.5)*7,vy:-2-Math.random()*4,life:1,ch:rc(),col:color});
+}
+function updSparks(){
+  for(let i=sparks.length-1;i>=0;i--){
+    const sp=sparks[i];
+    sp.x+=sp.vx;sp.y+=sp.vy;sp.vy+=0.2;sp.life-=0.04;
+    if(sp.life<=0) sparks.splice(i,1);
+  }
+}
+function drawSparks(){
+  ctx.font=`11px 'Courier New',monospace`; ctx.shadowBlur=0;
+  for(const sp of sparks){ctx.globalAlpha=sp.life;ctx.fillStyle=sp.col;ctx.fillText(sp.ch,sp.x,sp.y);}
+  ctx.globalAlpha=1;
+}
+
+// ══════════════════════════════════════════════════════════════
+// MOTS FRANÇAIS qui apparaissent dans les streams
+// ══════════════════════════════════════════════════════════════
+const FR_WORDS = [
+  // Mots courts (apparaissent plus souvent)
+  'flux','onde','code','data','signe','nuit','arts','lieu','jeu',
+  'temps','corps','geste','espace','image','lumière','forme','son',
+  'peau','oeil','main','voix','regard','trace','monde','réel',
+  // Mots-clés de l'expo
+  'arcade','arcadia','mai','immersif','virtuel','numérique',
+  // Verbes
+  'voir','sentir','toucher','créer','jouer','danser','entrer',
+  // Phrases très courtes
+  'ENTRE ICI','JOUE','REGARDE','TOUCHE','SENS','IMAGINE',
+];
+
+// Un "slot de mot" est injecté dans un stream : le stream
+// affichera les lettres du mot une par une à mesure qu'il descend.
+// wordSlot = null ou { word, progress, startRow }
+
+function mkWordSlot(){
+  const w = FR_WORDS[~~(Math.random()*FR_WORDS.length)].toUpperCase();
+  return { word:w, pos:0, life: w.length + 8 };
+}
+
+// ══════════════════════════════════════════════════════════════
+// STREAMS
+// ══════════════════════════════════════════════════════════════
+function updStream(s){
+  // Remplir les chars
+  while(s.chars.length<s.len) s.chars.push(rc());
+
+  // ── Mutation : CHAQUE frame, TOUS les chars changent (sauf ceux dans un mot)
+  // La tête change plus vite, la queue plus lentement
+  for(let i=0;i<s.chars.length;i++){
+    const frac=1-i/s.len; // 1=tête, 0=queue
+    // Probabilité de mutation : élevée en tête, décroît vers la queue
+    if(Math.random() < 0.35 + frac*0.55){
+      s.chars[i]=rc();
+    }
+  }
+
+  s.glitch=Math.random()<0.002?3:Math.max(0,s.glitch-1);
+
+  // ── Mot français : avance d'un caractère par N frames
+  if(s.wordSlot){
+    s.wordTimer++;
+    // Le mot s'affiche lettre par lettre, une lettre tous les ~4 frames
+    if(s.wordTimer%4===0){
+      s.wordSlot.pos=Math.min(s.wordSlot.word.length, s.wordSlot.pos+1);
+      s.wordSlot.life--;
+    }
+    if(s.wordSlot.life<=0) s.wordSlot=null;
+  } else if(Math.random()<0.003){
+    // Chance de spawner un nouveau mot sur ce stream
+    s.wordSlot=mkWordSlot();
+    s.wordTimer=0;
+  }
+
+  const hx=s.col*FS+s.dx, hy=~~(s.y)*FS;
+  const rep=repulsion(hx,hy);
+  s.dvx=(s.dvx+rep.dx*0.55)*DEF_DECAY;
+  s.dvy=(s.dvy+rep.dy*0.40)*DEF_DECAY;
+  s.dx=s.dx*0.93+s.dvx; s.dy+=s.dvy;
+  if(rep.mag>0.9&&Math.random()<0.35) addSparks(hx,hy,rep.nearColor||'#ffffff');
+  s.y+=s.spd*Math.max(0.1,1-Math.abs(s.dvy)*0.35);
+  if(s.y-s.len>rows+2){const ns=mkStream(s.col,false);ns.dx=s.dx;ns.dvx=s.dvx;Object.assign(s,ns);s.chars=[];}
+}
+
+function drawStreams(pal){
+  ctx.font=`${FS}px 'Courier New',monospace`;
+  for(const s of streams){
+    const bx=s.col*FS+s.dx;
+    const hue=streamHues[s.col]||0;
+
+    for(let i=0;i<s.len;i++){
+      const row=~~(s.y)-i; if(row<0||row>rows) continue;
+      const py=row*FS+s.dy;
+      const frac=1-i/s.len;
+
+      // ── Déterminer si ce slot fait partie d'un mot français ──
+      // Le mot s'affiche dans les positions i=1..wordLen depuis la tête
+      let frChar=null;
+      if(s.wordSlot && i>=1 && i<=s.wordSlot.pos && i<=s.wordSlot.word.length){
+        frChar=s.wordSlot.word[i-1];
+      }
+
+      // ── Proximité avec une main (pour teinter la tête) ──
+      let nearColor=null,nearDist=Infinity;
+      for(const hp of handPoints){
+        const d=Math.hypot(bx-hp.x,py-hp.y);
+        if(d<hp.r*0.55&&d<nearDist){nearDist=d;nearColor=hp.color;}
+      }
+
+      let color; ctx.shadowBlur=0;
+
+      if(frChar!==null){
+        // Mot français : blanc légèrement teinté, persistant, net
+        // Intensité : plus vif au début du mot, s'estompe vers la queue
+        const wordFrac=1-(i-1)/Math.max(1,s.wordSlot.word.length);
+        const lum=55+wordFrac*35;
+        color=`hsl(${hue},30%,${lum}%)`; // quasi-blanc légèrement teinté
+        ctx.shadowBlur=0;
+      } else if(i===0){
+        // Tête : blanc ou couleur main
+        color=nearColor||'#ffffff';
+        ctx.shadowColor=nearColor||`hsl(${hue},80%,70%)`; ctx.shadowBlur=nearColor?10:5;
+      } else {
+        // Queue : couleur HSL de la colonne, s'estompe
+        const a=Math.pow(frac,1.5);
+        const lum=(8+a*28)*a;
+        color=`hsl(${hue},65%,${lum}%)`;
+      }
+
+      // Mot-clé expo (remplace le mot français si présent sur la tête)
+      let ch = frChar!==null ? frChar : (s.chars[i]||rc());
+      if(s.kw&&i===0){
+        ch=s.kw[s.kwp%s.kw.length]; if(Math.random()<0.05)s.kwp++;
+        color=pal.key; ctx.shadowColor=pal.key; ctx.shadowBlur=9;
+      }
+
+      ctx.fillStyle=color;
+      ctx.fillText(ch, bx+(s.glitch>0?(Math.random()-0.5)*5:0), py);
+    }
+    ctx.shadowBlur=0;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// PARTICULES INTER-MAINS
+// ══════════════════════════════════════════════════════════════
+let bridge=[];
+const BRIDGE_MAX=30;
+function updBridge(){
+  for(let i=bridge.length-1;i>=0;i--){
+    const p=bridge[i]; p.t+=p.spd;
+    if(p.t>=1){bridge.splice(i,1);continue;}
+    const dx=p.tx-p.sx,dy=p.ty-p.sy,len=Math.hypot(dx,dy)||1;
+    const nx=-dy/len,ny=dx/len;
+    const wave=Math.sin(p.t*Math.PI*p.freq)*p.amp;
+    p.x=p.sx+dx*p.t+nx*wave; p.y=p.sy+dy*p.t+ny*wave;
+    p.life=Math.sin(p.t*Math.PI);
+    if(Math.random()<0.08) p.ch=rc();
+  }
+  if(hands.length===2&&bridge.length<BRIDGE_MAX){
+    const h0=hands[0],h1=hands[1];
+    const p0=h0.pts[~~(Math.random()*h0.pts.length)];
+    const p1=h1.pts[~~(Math.random()*h1.pts.length)];
+    bridge.push({sx:p0.x,sy:p0.y,tx:p1.x,ty:p1.y,x:p0.x,y:p0.y,t:0,
+      spd:0.008+Math.random()*0.012,ch:rc(),life:0,
+      col0:h0.color,col1:h1.color,freq:1+Math.random()*2,amp:5+Math.random()*18});
+  }
+}
+function drawBridge(){
+  ctx.font=`12px 'Courier New',monospace`; ctx.shadowBlur=0;
+  for(const p of bridge){
+    ctx.globalAlpha=p.life*0.8;
+    ctx.fillStyle=lerpHex(p.col0,p.col1,p.t);
+    ctx.fillText(p.ch,p.x,p.y);
+  }
+  ctx.globalAlpha=1;
+  if(hands.length===2){
+    ctx.globalAlpha=0.08; ctx.strokeStyle='#fff';
+    ctx.setLineDash([3,10]); ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(hands[0].palmX,hands[0].palmY);
+    ctx.lineTo(hands[1].palmX,hands[1].palmY); ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha=1;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// LIGNES FOND (défilement horizontal)
+// ══════════════════════════════════════════════════════════════
+let hLines=[];
+function genHL(){
+  const actions=['Lecture du flux','Analyse du signal','Projection en cours','Synchronisation','Traitement',
+                 'Encodage','Diffusion','Cartographie'];
+  const obj=['environnement','données gestuelles','vecteur spatial','champ immersif','matrice visuelle'];
+  return `${actions[~~(Math.random()*actions.length)]} — ${obj[~~(Math.random()*obj.length)]}`;
+}
+function spawnHL(){ if(hLines.length>4) return; hLines.push({y:~~(Math.random()*rows),op:0,ph:'in',text:genHL(),scroll:0,spd:0.3+Math.random()*0.6,t:0}); }
+function updHL(){
+  for(let i=hLines.length-1;i>=0;i--){
+    const h=hLines[i]; h.scroll+=h.spd;
+    if(h.ph==='in'){h.op=Math.min(1,h.op+0.035);if(h.op>=1)h.ph='hold';}
+    if(h.ph==='hold'){h.t++;if(h.t>90)h.ph='out';}
+    if(h.ph==='out'){h.op=Math.max(0,h.op-0.022);if(h.op<=0)hLines.splice(i,1);}
+  }
+  if(Math.random()<0.006) spawnHL();
+}
+function drawHL(pal){
+  ctx.font=`11px 'Courier New',monospace`; ctx.shadowBlur=0;
+  for(const h of hLines){
+    ctx.globalAlpha=h.op*0.35; ctx.fillStyle=pal.accent;
+    ctx.fillText(h.text,-(h.scroll%(W+600))+60,h.y*FS);
+  }
+  ctx.globalAlpha=1;
+}
+
+// ══════════════════════════════════════════════════════════════
+// GLITCH
+// ══════════════════════════════════════════════════════════════
+let gGlitch=0;
+function trigGlitch(){gGlitch=5+~~(Math.random()*9);}
+function drawGlitch(){
+  if(gGlitch<=0) return;
+  for(let i=0;i<~~(gGlitch/2);i++){
+    try{const sy=Math.random()*H,sh=1+Math.random()*8,sx=(Math.random()-0.5)*30;ctx.putImageData(ctx.getImageData(0,sy,W,sh),sx,sy);}catch(e){}
+  }
+  gGlitch--;
+}
+
+// ══════════════════════════════════════════════════════════════
+// BOUCLE PRINCIPALE
+// ══════════════════════════════════════════════════════════════
+const fpsEl=document.getElementById('fps'),clockEl=document.getElementById('clock');
+let lt=0,fc=0,ft=0;
+function updClock(){const n=new Date();if(clockEl)clockEl.textContent=[n.getHours(),n.getMinutes(),n.getSeconds()].map(v=>v.toString().padStart(2,'0')).join(':');}
+
+function loop(ts){
+  const dt=ts-lt;lt=ts;fc++;ft+=dt;palCycle++;
+  if(ft>1000){if(fpsEl)fpsEl.textContent=Math.round(fc*1000/ft);fc=0;ft=0;updClock();}
+  palBlend=(palCycle%PAL_DUR)/PAL_DUR;
+  if(palCycle%PAL_DUR===0){curPI=nxtPI;nxtPI=(nxtPI+1)%PALETTES.length;}
+  const pal=getPal();
+
+  ctx.fillStyle='rgba(0,0,0,0.082)';
+  ctx.fillRect(0,0,W,H);
+
+  // Sync rayon de répulsion avec la forme hexagonale courante
+  hands.forEach(hand=>{
+    const hp=handPoints.find(p=>p.handIdx===hand.idx);
+    const shp=handShapes[hand.idx];
+    if(hp&&shp){ hp.x=hand.palmX; hp.y=hand.palmY; hp.r=shp.r; }
+  });
+
+  streams.forEach(updStream);
+  updSparks(); updHL(); updBridge(); updTerminals();
+  if(Math.random()<0.001) trigGlitch();
+
+  drawStreams(pal);
+  drawSparks();
+  drawHL(pal);
+  drawBridge();
+
+  // Dessiner les formes de mains
+  hands.forEach((hand,i)=>{ drawHandShape(hand, handShapes[i]||handShapes[0], pal); });
+
+  drawGlitch();
+  requestAnimationFrame(loop);
+}
+
+function resize(){
+  W=canvas.width=window.innerWidth;
+  H=canvas.height=window.innerHeight;
+  initStreams();
+  const tA=document.getElementById('term-a'),tB=document.getElementById('term-b');
+  if(tA){tA.style.left=(W*0.25-150)+'px';tA.style.top=(H*0.5-260)+'px';}
+  if(tB){tB.style.left=(W*0.75-150)+'px';tB.style.top=(H*0.5+30)+'px';}
+}
+window.addEventListener('resize',resize);
+resize();
+for(let i=0;i<3;i++) spawnHL();
+requestAnimationFrame(loop);
+window.addEventListener('load',()=>{setTimeout(initHands,600);});
+document.addEventListener('dblclick',()=>{
+  if(!document.fullscreenElement)document.documentElement.requestFullscreen?.();
+  else document.exitFullscreen?.();
+});
+</script>
+</body>
+</html>

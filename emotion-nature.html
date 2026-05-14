@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Émotions & Nature</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #000; font-family: 'Georgia', serif; }
+  #canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
+  #videoEl { position: fixed; width: 1px; height: 1px; opacity: 0; top: -9999px; }
+  #ui {
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+    display: flex; flex-direction: column; align-items: center; gap: 10px; z-index: 10;
+  }
+  #emotionBadge {
+    background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.2);
+    color: #fff; padding: 8px 22px; border-radius: 999px; font-size: 15px;
+    letter-spacing: 0.05em; backdrop-filter: blur(10px); white-space: nowrap;
+  }
+  #startBtn {
+    background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.4);
+    color: #fff; padding: 11px 30px; border-radius: 999px; font-size: 15px;
+    cursor: pointer; backdrop-filter: blur(10px); transition: all 0.2s; letter-spacing: 0.03em;
+  }
+  #startBtn:hover { background: rgba(255,255,255,0.22); transform: scale(1.03); }
+  #faceBox {
+    position: fixed; border: 2px solid rgba(255,255,255,0.5); border-radius: 10px;
+    pointer-events: none; z-index: 5; display: none; transition: border-color 0.3s;
+    box-shadow: 0 0 12px rgba(255,255,255,0.15);
+  }
+  #moodBar {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    width: 200px; height: 6px; background: rgba(255,255,255,0.15); border-radius: 999px;
+    overflow: hidden; z-index: 10;
+  }
+  #moodFill {
+    height: 100%; width: 50%; border-radius: 999px; transition: width 0.3s, background 0.3s;
+    background: #888;
+  }
+  #moodLabel {
+    position: fixed; bottom: 34px; left: 50%; transform: translateX(-50%);
+    color: rgba(255,255,255,0.5); font-size: 11px; letter-spacing: 0.08em;
+    z-index: 10; text-align: center; white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<video id="videoEl" autoplay muted playsinline></video>
+<div id="faceBox"></div>
+<div id="ui">
+  <div id="emotionBadge">🌿 En attente...</div>
+  <button id="startBtn">✦ Activer la caméra</button>
+</div>
+<div id="moodLabel">COLÈRE &nbsp;————————&nbsp; JOIE</div>
+<div id="moodBar"><div id="moodFill"></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/face-api.js"></script>
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const video = document.getElementById('videoEl');
+const badge = document.getElementById('emotionBadge');
+const startBtn = document.getElementById('startBtn');
+const faceBox = document.getElementById('faceBox');
+const moodFill = document.getElementById('moodFill');
+
+let W, H;
+let mood = 0;       // current interpolated value: -1 (angry) → +1 (happy)
+let targetMood = 0;
+let modelsLoaded = false;
+let detecting = false;
+let windTime = 0;
+
+// Scene objects
+let clouds = [], flowers = [], birds = [], leafFall = [], particles = [];
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  initScene();
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+function lerp(a, b, t) { return a + (b - a) * t; }
+function clamp(v, mn, mx) { return Math.max(mn, Math.min(mx, v)); }
+
+function lerpRGB(a, b, t) {
+  const p = c => [parseInt(c.slice(1,3),16), parseInt(c.slice(3,5),16), parseInt(c.slice(5,7),16)];
+  const [ar,ag,ab] = p(a), [br,bg,bb] = p(b);
+  return `rgb(${Math.round(ar+(br-ar)*t)},${Math.round(ag+(bg-ag)*t)},${Math.round(ab+(bb-ab)*t)})`;
+}
+
+// ── Scene init ───────────────────────────────────────────────────────────────
+function initScene() {
+  clouds = [];
+  flowers = [];
+  birds = [];
+  leafFall = [];
+  particles = [];
+
+  for (let i = 0; i < 6; i++) {
+    clouds.push({
+      x: Math.random() * W, y: 50 + Math.random() * 100,
+      w: 90 + Math.random() * 120, h: 35 + Math.random() * 30,
+      speed: 0.12 + Math.random() * 0.18,
+    });
+  }
+
+  const GROUND = H * 0.70;
+  for (let i = 0; i < 28; i++) {
+    flowers.push({
+      x: 30 + (i / 28) * (W - 60) + (Math.random() - 0.5) * 30,
+      y: GROUND + 5 + Math.random() * 55,
+      size: 5 + Math.random() * 9,
+      hue: [340, 270, 50, 200][Math.floor(Math.random()*4)],
+      phase: Math.random() * Math.PI * 2,
+      bloom: 0,
+    });
+  }
+
+  for (let i = 0; i < 10; i++) spawnBird();
+}
+
+function spawnBird() {
+  birds.push({
+    x: Math.random() * W, y: 60 + Math.random() * 180,
+    vx: (Math.random() < 0.5 ? 1 : -1) * (1 + Math.random() * 2),
+    wing: Math.random() * Math.PI * 2,
+    size: 5 + Math.random() * 5,
+    alpha: 0,
+    chirpT: Math.floor(Math.random() * 200),
+  });
+}
+
+function spawnLeaf(x, y) {
+  leafFall.push({
+    x, y, vx: (Math.random()-0.5)*2, vy: 1.2+Math.random()*2,
+    rot: Math.random()*Math.PI*2, drot: (Math.random()-0.5)*0.12,
+    size: 5+Math.random()*8, hue: 25+Math.random()*50, life: 1
+  });
+}
+
+// ── Audio ────────────────────────────────────────────────────────────────────
+let audioCtx;
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+function chirp() {
+  if (!audioCtx || mood < 0.2) return;
+  const freq = 500 + Math.random() * 500;
+  const now = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(freq, now);
+  osc.frequency.exponentialRampToValueAtTime(freq * 1.6, now + 0.07);
+  osc.frequency.exponentialRampToValueAtTime(freq * 1.1, now + 0.18);
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(0.05 * mood, now + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+  osc.start(); osc.stop(now + 0.25);
+}
+
+// ── Trees ────────────────────────────────────────────────────────────────────
+const TREES = [
+  { x: 0.10, scale: 1.15 },
+  { x: 0.30, scale: 0.88 },
+  { x: 0.58, scale: 1.05 },
+  { x: 0.80, scale: 0.92 },
+  { x: 0.94, scale: 0.78 },
+];
+
+function drawTree(tx, groundY, scale, t) {
+  const x = tx * W;
+  const trunkH = 130 * scale;
+  const trunkW = 14 * scale;
+  const lush = clamp(t, 0.05, 1);
+  const wither = 1 - lush;
+
+  // Trunk
+  ctx.fillStyle = lerpRGB('#2e1a0a', '#4a2e10', t);
+  ctx.beginPath();
+  ctx.moveTo(x - trunkW/2, groundY + 2);
+  ctx.quadraticCurveTo(x - trunkW*0.6, groundY - trunkH*0.5, x - trunkW*0.35, groundY - trunkH);
+  ctx.quadraticCurveTo(x, groundY - trunkH - 8*scale, x + trunkW*0.35, groundY - trunkH);
+  ctx.quadraticCurveTo(x + trunkW*0.6, groundY - trunkH*0.5, x + trunkW/2, groundY + 2);
+  ctx.fill();
+
+  // Branches (always visible)
+  const branches = [
+    {dx:-55, dy:-75, ex:-85, ey:-110},
+    {dx: 50, dy:-80, ex: 78, ey:-115},
+    {dx:-30, dy:-105, ex:-48, ey:-135},
+    {dx: 32, dy:-110, ex: 50, ey:-140},
+  ];
+  ctx.strokeStyle = lerpRGB('#2e1a0a', '#4a2e12', t);
+  branches.forEach(b => {
+    ctx.lineWidth = 3 * scale;
+    ctx.beginPath();
+    ctx.moveTo(x, groundY - trunkH * 0.7);
+    ctx.quadraticCurveTo(x + b.dx*scale*0.5, groundY - trunkH + b.dy*scale*0.5,
+                         x + b.dx*scale, groundY - trunkH + b.dy*scale);
+    ctx.stroke();
+    ctx.lineWidth = 1.5 * scale;
+    ctx.beginPath();
+    ctx.moveTo(x + b.dx*scale, groundY - trunkH + b.dy*scale);
+    ctx.lineTo(x + b.ex*scale, groundY - trunkH + b.ey*scale);
+    ctx.stroke();
+  });
+
+  // Foliage clusters
+  const clusters = [
+    {dx:0, dy:-trunkH-28, r:58},
+    {dx:-42, dy:-trunkH+2, r:40},
+    {dx:42, dy:-trunkH-2, r:38},
+    {dx:-18, dy:-trunkH-55, r:34},
+    {dx:20, dy:-trunkH-52, r:32},
+    {dx:0, dy:-trunkH-75, r:26},
+  ];
+
+  clusters.forEach((c, ci) => {
+    const r = c.r * scale * lush;
+    if (r < 5) {
+      if (wither > 0.3 && Math.random() < 0.015) spawnLeaf(x + c.dx*scale, groundY + c.dy*scale);
+      return;
+    }
+    const rGreen = Math.round(lerp(30, 140, lush));
+    const rRed = Math.round(lerp(160, 40, lush));
+    ctx.beginPath();
+    ctx.arc(x + c.dx*scale, groundY + c.dy*scale, r, 0, Math.PI*2);
+    ctx.fillStyle = `rgba(${rRed},${rGreen},20,0.88)`;
+    ctx.fill();
+    // Highlight
+    ctx.beginPath();
+    ctx.arc(x + c.dx*scale - r*0.22, groundY + c.dy*scale - r*0.22, r*0.5, 0, Math.PI*2);
+    ctx.fillStyle = `rgba(${rRed+40},${rGreen+30},40,0.18)`;
+    ctx.fill();
+
+    if (wither > 0.25 && Math.random() < wither * 0.025) {
+      spawnLeaf(x + c.dx*scale + (Math.random()-0.5)*r, groundY + c.dy*scale + (Math.random()-0.5)*r);
+    }
+  });
+}
+
+// ── Main draw loop ───────────────────────────────────────────────────────────
+function draw() {
+  windTime += 0.013;
+  mood = lerp(mood, targetMood, 0.022);
+
+  const t = (mood + 1) / 2; // 0=angry, 1=happy
+  const groundY = H * 0.70;
+
+  // Sky
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, groundY);
+  skyGrad.addColorStop(0, lerpRGB('#1a0808', '#0d2356', t));
+  skyGrad.addColorStop(0.45, lerpRGB('#551a1a', '#2a6abf', t));
+  skyGrad.addColorStop(1, lerpRGB('#7a2a1a', '#7ec8e3', t));
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, groundY);
+
+  // Sun/moon
+  const sunX = W * 0.74, sunY = H * 0.17;
+  const sunR = lerp(20, 52, t);
+  const sunCol = lerpRGB('#6b1a00', '#ffdf60', t);
+  const glow = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, sunR * 2.5);
+  glow.addColorStop(0, sunCol);
+  glow.addColorStop(0.5, sunCol.replace('rgb(','rgba(').replace(')',`,${lerp(0.15,0.35,t)})`));
+  glow.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.beginPath(); ctx.arc(sunX, sunY, sunR * 2.5, 0, Math.PI*2);
+  ctx.fillStyle = glow; ctx.fill();
+  ctx.beginPath(); ctx.arc(sunX, sunY, sunR, 0, Math.PI*2);
+  ctx.fillStyle = sunCol; ctx.fill();
+
+  // Clouds
+  clouds.forEach(c => {
+    c.x += c.speed * lerp(0.2, 1.1, t);
+    if (c.x - c.w > W) c.x = -c.w;
+    ctx.globalAlpha = lerp(0.18, 0.8, t);
+    ctx.fillStyle = lerpRGB('#5a2020', '#f0f4ff', t);
+    for (let i = -1; i <= 1; i++) {
+      ctx.beginPath();
+      ctx.ellipse(c.x + i*c.w*0.38, c.y + Math.abs(i)*c.h*0.35, c.w*(0.45+0.1*Math.abs(i)), c.h*(0.6-0.1*Math.abs(i)), 0, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  });
+
+  // Ground
+  const grassGrad = ctx.createLinearGradient(0, groundY, 0, H);
+  grassGrad.addColorStop(0, lerpRGB('#3a1010', '#3d8c1a', t));
+  grassGrad.addColorStop(0.5, lerpRGB('#280c0c', '#276612', t));
+  grassGrad.addColorStop(1, lerpRGB('#180808', '#174409', t));
+  ctx.fillStyle = grassGrad;
+  ctx.fillRect(0, groundY, W, H - groundY);
+
+  // Grass blades
+  const bladeN = Math.round(lerp(15, 70, t));
+  for (let i = 0; i < bladeN; i++) {
+    const bx = (i / bladeN) * W;
+    const bh = 12 + Math.sin(i*1.9)*6;
+    const sway = Math.sin(windTime*1.2 + i*0.9) * 8 * lerp(0.3, 1.5, t);
+    ctx.beginPath();
+    ctx.moveTo(bx, groundY + 3);
+    ctx.quadraticCurveTo(bx + sway*0.6, groundY - bh*0.5, bx + sway, groundY - bh);
+    ctx.strokeStyle = lerpRGB('#4a1818', '#5aab20', t);
+    ctx.lineWidth = 1.5; ctx.globalAlpha = 0.8; ctx.stroke(); ctx.globalAlpha = 1;
+  }
+
+  // Trees
+  TREES.forEach(tr => drawTree(tr.x, groundY, tr.scale, t));
+
+  // Falling leaves
+  leafFall.forEach(lf => {
+    lf.x += lf.vx + Math.sin(windTime*1.5)*0.6;
+    lf.y += lf.vy; lf.rot += lf.drot; lf.life -= 0.007;
+    ctx.save(); ctx.globalAlpha = clamp(lf.life, 0, 1);
+    ctx.translate(lf.x, lf.y); ctx.rotate(lf.rot);
+    ctx.fillStyle = `hsl(${lf.hue},65%,38%)`;
+    ctx.beginPath(); ctx.ellipse(0, 0, lf.size, lf.size*0.5, 0, 0, Math.PI*2);
+    ctx.fill(); ctx.restore();
+  });
+  for (let i = leafFall.length-1; i >= 0; i--) {
+    if (leafFall[i].life <= 0 || leafFall[i].y > H) leafFall.splice(i,1);
+  }
+
+  // Flowers
+  flowers.forEach(f => {
+    f.bloom = clamp(lerp(f.bloom, t > 0.25 ? 1 : 0.04, 0.018), 0, 1);
+    const sway = Math.sin(windTime + f.phase) * 4 * f.bloom;
+    const stemH = f.size * 3 * f.bloom;
+    ctx.beginPath();
+    ctx.moveTo(f.x, f.y);
+    ctx.quadraticCurveTo(f.x + sway*6, f.y - stemH*0.5, f.x + sway*12, f.y - stemH);
+    ctx.strokeStyle = lerpRGB('#3a1a10', '#3a8010', t);
+    ctx.lineWidth = 1.5; ctx.stroke();
+    const px = f.x + sway*12, py = f.y - stemH;
+    const pr = f.size * f.bloom;
+    for (let p = 0; p < 6; p++) {
+      const a = (p/6)*Math.PI*2 + windTime*0.25;
+      ctx.beginPath();
+      ctx.ellipse(px+Math.cos(a)*pr*0.85, py+Math.sin(a)*pr*0.85, pr*0.58, pr*0.32, a, 0, Math.PI*2);
+      ctx.fillStyle = `hsla(${f.hue},72%,${lerp(18,60,f.bloom)}%,${0.75*f.bloom})`;
+      ctx.fill();
+    }
+    ctx.beginPath(); ctx.arc(px, py, pr*0.38, 0, Math.PI*2);
+    ctx.fillStyle = `hsla(50,90%,${lerp(12,68,f.bloom)}%,${f.bloom})`; ctx.fill();
+  });
+
+  // Birds
+  const wantBirds = Math.round(lerp(0, 8, t));
+  birds.forEach((b, i) => {
+    const want = i < wantBirds ? 1 : 0;
+    b.alpha = clamp(lerp(b.alpha, want, 0.025), 0, 1);
+    b.x += b.vx * b.alpha;
+    b.y += Math.sin(windTime*0.9 + i*1.1) * 0.5;
+    b.wing += 0.14;
+    b.chirpT--;
+    if (b.chirpT <= 0 && b.alpha > 0.7) { chirp(); b.chirpT = 100 + Math.random()*200; }
+    if (b.x > W+60) b.x = -40;
+    if (b.x < -60) b.x = W+40;
+    const wFlap = Math.sin(b.wing)*6;
+    ctx.save(); ctx.globalAlpha = b.alpha * 0.85;
+    ctx.translate(b.x, b.y);
+    if (b.vx < 0) ctx.scale(-1,1);
+    ctx.strokeStyle = lerpRGB('#3a2a4a', '#1a1a3a', Math.max(0, t));
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(0,0); ctx.quadraticCurveTo(-b.size, -b.size+wFlap, -b.size*2.2, wFlap*0.4);
+    ctx.moveTo(0,0); ctx.quadraticCurveTo(b.size, -b.size+wFlap, b.size*2.2, wFlap*0.4);
+    ctx.stroke();
+    ctx.fillStyle = '#2a2a3a'; ctx.beginPath(); ctx.arc(0,1,2,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  });
+
+  // Particles — pollen (happy) or embers (angry)
+  if (Math.random() < 0.35) {
+    const isHappy = t > 0.5;
+    particles.push({
+      x: Math.random() * W,
+      y: isHappy ? groundY + Math.random()*(H-groundY)*0.4 : groundY - Math.random()*100,
+      vx: (Math.random()-0.5)*0.8, vy: isHappy ? -0.7 : 0.8,
+      life: 1, size: 1.2+Math.random()*2.5, hue: isHappy ? 55 : 15
+    });
+  }
+  for (let i = particles.length-1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx + Math.sin(windTime*2+i)*0.4; p.y += p.vy; p.life -= 0.01;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+    ctx.fillStyle = `hsla(${p.hue},85%,70%,${p.life*0.65})`; ctx.fill();
+    if (p.life<=0) particles.splice(i,1);
+  }
+  if (particles.length > 250) particles.splice(0, 30);
+
+  // Update mood bar UI
+  const pct = Math.round(((mood + 1) / 2) * 100);
+  moodFill.style.width = pct + '%';
+  moodFill.style.background = t < 0.35 ? `hsl(0,70%,50%)` : t > 0.65 ? `hsl(110,65%,45%)` : `hsl(50,70%,50%)`;
+
+  requestAnimationFrame(draw);
+}
+
+// ── Face detection ───────────────────────────────────────────────────────────
+async function loadModels() {
+  badge.textContent = '⏳ Chargement des modèles…';
+  try {
+    const BASE = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model';
+    await faceapi.nets.tinyFaceDetector.loadFromUri(BASE);
+    await faceapi.nets.faceExpressionNet.loadFromUri(BASE);
+    modelsLoaded = true;
+    badge.textContent = '✓ Prêt — cliquer pour activer';
+  } catch(e) {
+    console.error(e);
+    badge.textContent = '⚠ Modèles indisponibles — Mode démo';
+    demoMode();
+  }
+}
+
+function demoMode() {
+  startBtn.style.display = 'none';
+  badge.textContent = '🎭 Mode démo';
+  let phase = 0;
+  setInterval(() => { phase += 0.018; targetMood = Math.sin(phase); updateBadgeTxt(); }, 50);
+}
+
+function updateBadgeTxt() {
+  if (mood > 0.35) badge.textContent = `😊 Joyeux · ${Math.round(mood*100)}%`;
+  else if (mood < -0.35) badge.textContent = `😠 En colère · ${Math.round(-mood*100)}%`;
+  else badge.textContent = `😐 Neutre`;
+}
+
+async function startCamera() {
+  ensureAudio();
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } });
+    video.srcObject = stream; await video.play();
+    startBtn.style.display = 'none';
+    badge.textContent = '🔍 Recherche visage…';
+    detectLoop();
+  } catch(e) {
+    badge.textContent = '❌ Caméra indisponible — Mode démo';
+    demoMode();
+  }
+}
+
+async function detectLoop() {
+  if (detecting) return; detecting = true;
+  const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.4 });
+  async function loop() {
+    if (video.readyState >= 2 && modelsLoaded) {
+      try {
+        const det = await faceapi.detectSingleFace(video, opts).withFaceExpressions();
+        if (det) {
+          const e = det.expressions;
+          const happy = e.happy || 0;
+          const angry = (e.angry||0) + (e.disgusted||0)*0.5 + (e.fearful||0)*0.3 + (e.sad||0)*0.4;
+          targetMood = clamp((happy - angry) * 1.5, -1, 1);
+          updateBadgeTxt();
+          // Face box (mirror)
+          const box = det.detection.box;
+          const vW = video.videoWidth || 640, vH = video.videoHeight || 480;
+          const sx = window.innerWidth / vW, sy = window.innerHeight / vH;
+          faceBox.style.display = 'block';
+          faceBox.style.left = (window.innerWidth - (box.x + box.width) * sx) + 'px';
+          faceBox.style.top = (box.y * sy) + 'px';
+          faceBox.style.width = (box.width * sx) + 'px';
+          faceBox.style.height = (box.height * sy) + 'px';
+          faceBox.style.borderColor = targetMood > 0.3 ? '#7be87b' : targetMood < -0.3 ? '#e87b7b' : 'rgba(255,255,255,0.45)';
+        } else {
+          faceBox.style.display = 'none';
+          badge.textContent = '🔍 Aucun visage détecté';
+          targetMood = lerp(targetMood, 0, 0.04);
+        }
+      } catch(e) { console.warn(e); }
+    }
+    setTimeout(loop, 180);
+  }
+  loop();
+}
+
+startBtn.addEventListener('click', () => {
+  if (!modelsLoaded) {
+    loadModels().then(() => { if (modelsLoaded) startCamera(); });
+  } else {
+    startCamera();
+  }
+});
+
+// Start
+initScene();
+loadModels();
+draw();
+</script>
+</body>
+</html>

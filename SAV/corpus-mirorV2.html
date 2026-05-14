@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CORPUS MIROR</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@300;400;700&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:100%; height:100%; background:#000; color:#e8e8e0; font-family:'Syne',sans-serif; overflow:hidden; cursor:none; }
+
+/* ── SPLASH ── */
+#splash {
+  position:fixed; inset:0; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; background:#000; z-index:200; gap:2.5rem;
+}
+.splash-eyebrow { font-family:'Space Mono',monospace; font-size:10px; letter-spacing:0.45em; color:#333; }
+.splash-logo { font-size:clamp(44px,7vw,80px); font-weight:700; color:#e8e8e0; letter-spacing:-0.03em; text-align:center; line-height:0.95; }
+.splash-sub { font-size:12px; color:#2e2e2e; letter-spacing:0.1em; text-align:center; max-width:340px; line-height:1.8; }
+.splash-auto { font-family:'Space Mono',monospace; font-size:8px; letter-spacing:0.35em; color:#1a1a1a; display:flex; gap:12px; align-items:center; }
+.splash-auto-count { font-size:18px; font-weight:700; color:#222; letter-spacing:-0.02em; }
+
+.mode-grid { display:grid; grid-template-columns:1fr 1fr; gap:1px; width:min(540px,88vw); border:1px solid #111; }
+.mode-card {
+  background:#060606; padding:2.5rem 2rem; cursor:none; position:relative;
+  transition:background 0.25s; overflow:hidden; user-select:none;
+}
+.mode-card:hover { background:#0c0c0c; }
+.mode-num { font-family:'Space Mono',monospace; font-size:9px; letter-spacing:0.4em; color:#1e1e1e; display:block; margin-bottom:1rem; }
+.mode-label { font-size:17px; font-weight:700; display:block; margin-bottom:0.5rem; letter-spacing:0.04em; }
+.mode-desc { font-size:10px; color:#2e2e2e; line-height:1.7; letter-spacing:0.04em; }
+.fill-bar { position:absolute; bottom:0; left:0; height:2px; width:0%; transition:none; }
+.mode-card[data-mode="record"] .fill-bar { background:#c8a96e; }
+.mode-card[data-mode="observe"] .fill-bar { background:#6ea8c8; }
+
+/* ── CURSOR ── */
+#cursor {
+  position:fixed; width:16px; height:16px; pointer-events:none;
+  border-radius:50%; border:1px solid rgba(255,255,255,0.3);
+  transform:translate(-50%,-50%); z-index:9999;
+  transition:transform 0.08s, border-color 0.2s;
+}
+#cursor.active { border-color:rgba(255,255,255,0.8); transform:translate(-50%,-50%) scale(1.5); }
+
+/* ── APP ── */
+#app { display:none; position:fixed; inset:0; }
+#app.on { display:block; }
+
+/* ── OBSERVE VIEW ── */
+#obs-view { position:absolute; inset:0; display:none; }
+#obs-view.on { display:block; }
+#obs-video { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+#obs-canvas { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+
+.match-reveal { position:absolute; inset:0; z-index:3; opacity:0; transition:opacity 2s ease; pointer-events:none; }
+.match-reveal.on { opacity:1; }
+.match-reveal img { width:100%; height:100%; object-fit:cover; display:block; }
+.match-reveal canvas { position:absolute; inset:0; width:100%; height:100%; mix-blend-mode:screen; }
+#obs-flash { position:absolute; inset:0; background:#6ea8c8; opacity:0; pointer-events:none; z-index:20; }
+
+/* Gesture zone — top strip for raising hand */
+#gz-raise {
+  position:absolute; top:0; left:0; right:0; height:35%; z-index:10;
+  pointer-events:none; display:flex; align-items:flex-end; justify-content:center;
+  padding-bottom:1.5rem;
+}
+.gz-label {
+  font-family:'Space Mono',monospace; font-size:8px; letter-spacing:0.4em;
+  color:#1a1a1a; text-align:center; line-height:2.2; transition:color 0.3s;
+}
+.gz-label.lit { color:#c8a96e; }
+.gz-progress {
+  position:absolute; bottom:0; left:0; height:1px; background:#c8a96e; width:0%;
+}
+
+/* ── RECORD VIEW ── */
+#rec-view { position:absolute; inset:0; display:none; background:#000; }
+#rec-view.on { display:block; }
+#rec-video { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); opacity:0.3; }
+#rec-canvas { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+#rec-flash { position:absolute; inset:0; background:#c8a96e; opacity:0; pointer-events:none; z-index:20; }
+
+/* Countdown overlay */
+#cd-wrap {
+  position:absolute; inset:0; display:none;
+  align-items:center; justify-content:center; flex-direction:column; gap:1.5rem; z-index:10;
+}
+#cd-wrap.on { display:flex; }
+.cd-ring-wrap { position:relative; width:140px; height:140px; }
+.cd-num {
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  font-size:56px; font-weight:700; color:#c8a96e; font-family:'Syne',sans-serif; letter-spacing:-0.04em;
+}
+.cd-lbl {
+  font-family:'Space Mono',monospace; font-size:8px; letter-spacing:0.45em; color:#c8a96e;
+  animation:blink 1.2s ease infinite;
+}
+@keyframes blink { 0%,100%{opacity:0.2} 50%{opacity:1} }
+
+/* ── SHARED HUD ── */
+.hud { position:absolute; z-index:30; pointer-events:none; }
+.hud.tl { top:1.5rem; left:1.5rem; }
+.hud.tr { top:1.5rem; right:1.5rem; display:flex; align-items:center; gap:12px; pointer-events:all; }
+.hud.bl { bottom:1.5rem; left:1.5rem; }
+.hud.br { bottom:1.5rem; right:1.5rem; text-align:right; }
+
+.hud-logo { font-family:'Space Mono',monospace; font-size:8px; letter-spacing:0.45em; color:#151515; }
+.hud-badge { font-family:'Space Mono',monospace; font-size:8px; letter-spacing:0.35em; padding:4px 12px; border:1px solid; }
+.hud-badge.rec { color:#c8a96e; border-color:rgba(200,169,110,0.2); }
+.hud-badge.obs { color:rgba(110,168,200,0.4); border-color:rgba(110,168,200,0.1); }
+.hud-status { font-family:'Space Mono',monospace; font-size:8px; letter-spacing:0.3em; color:#1a1a1a; }
+.hud-count { font-family:'Space Mono',monospace; font-size:8px; letter-spacing:0.3em; color:#151515; }
+.hud-count span { font-size:32px; font-weight:700; color:#1e1e1e; letter-spacing:-0.03em; display:block; line-height:1; }
+.match-info { font-family:'Space Mono',monospace; font-size:8px; letter-spacing:0.3em; color:rgba(110,168,200,0.5); }
+
+.fs-btn {
+  font-family:'Space Mono',monospace; font-size:8px; letter-spacing:0.2em;
+  padding:5px 12px; background:none; border:1px solid #161616; color:#1e1e1e;
+  cursor:pointer; transition:all 0.2s; pointer-events:all;
+}
+.fs-btn:hover { border-color:#2a2a2a; color:#444; }
+
+/* Corners */
+.cf { position:absolute; inset:0; pointer-events:none; z-index:5; }
+.cf div { position:absolute; width:18px; height:18px; border-style:solid; border-color:rgba(255,255,255,0.04); }
+.cf .tl { top:12px; left:12px; border-width:1px 0 0 1px; }
+.cf .tr { top:12px; right:12px; border-width:1px 1px 0 0; }
+.cf .bl { bottom:12px; left:12px; border-width:0 0 1px 1px; }
+.cf .br { bottom:12px; right:12px; border-width:0 1px 1px 0; }
+
+/* Scan */
+.scan { position:absolute; left:0; right:0; height:1px; z-index:6; pointer-events:none;
+  background:linear-gradient(90deg,transparent,rgba(110,168,200,0.06),rgba(110,168,200,0.35),rgba(110,168,200,0.06),transparent);
+  animation:scan 7s ease-in-out infinite; }
+@keyframes scan { 0%{top:0%} 100%{top:100%} }
+
+/* Toast */
+#toast {
+  position:fixed; bottom:2.5rem; left:50%; transform:translateX(-50%) translateY(12px);
+  background:#080808; border:1px solid #141414;
+  padding:0.6rem 1.5rem; font-family:'Space Mono',monospace; font-size:8px;
+  letter-spacing:0.25em; color:#c8a96e; opacity:0; transition:all 0.3s;
+  pointer-events:none; z-index:9998; white-space:nowrap;
+}
+#toast.on { opacity:1; transform:translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<div id="cursor"></div>
+
+<!-- SPLASH -->
+<div id="splash">
+  <div class="splash-eyebrow">Studio EYA · Dispositif</div>
+  <div class="splash-logo">CORPUS<br>MIROR</div>
+  <div class="splash-sub">Maintenez la main sur une zone pour sélectionner — aucun clic requis</div>
+
+  <div class="mode-grid">
+    <div class="mode-card" data-mode="record" id="card-record" onclick="pickMode('record')">
+      <span class="mode-num">01</span>
+      <span class="mode-label">Enregistrement</span>
+      <span class="mode-desc">Capturez votre posture et laissez une empreinte dans le dispositif</span>
+      <div class="fill-bar" id="fb-record"></div>
+    </div>
+    <div class="mode-card" data-mode="observe" id="card-observe" onclick="pickMode('observe')">
+      <span class="mode-num">02</span>
+      <span class="mode-label">Observation</span>
+      <span class="mode-desc">Découvrez votre reflet dans le corps des autres visiteurs</span>
+      <div class="fill-bar" id="fb-observe"></div>
+    </div>
+  </div>
+
+  <div class="splash-auto">
+    <span>MODE OBSERVATION DANS</span>
+    <span class="splash-auto-count" id="auto-ct">5</span>
+    <span>SECONDES</span>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+
+  <!-- OBSERVE -->
+  <div id="obs-view">
+    <video id="obs-video" autoplay playsinline muted></video>
+    <canvas id="obs-canvas"></canvas>
+    <div class="scan"></div>
+    <div class="match-reveal" id="match-reveal">
+      <img id="match-img" alt=""/>
+      <canvas id="match-ov"></canvas>
+    </div>
+    <div id="obs-flash"></div>
+    <div id="gz-raise">
+      <div class="gz-label" id="gz-lbl">LEVER LA MAIN AU-DESSUS DE LA TÊTE<br>POUR PASSER EN ENREGISTREMENT</div>
+      <div class="gz-progress" id="gz-prog"></div>
+    </div>
+    <div class="cf"><div class="tl"></div><div class="tr"></div><div class="bl"></div><div class="br"></div></div>
+    <div class="hud tl"><div class="hud-logo">CORPUS MIROR</div></div>
+    <div class="hud tr">
+      <div class="hud-badge obs">MODE OBSERVATION</div>
+      <button class="fs-btn" onclick="toggleFS()">⛶ PLEIN ÉCRAN</button>
+    </div>
+    <div class="hud bl"><div class="match-info" id="match-info"></div></div>
+    <div class="hud br">
+      <div class="hud-count"><span id="obs-ct">0</span>POSTURES ARCHIVÉES</div>
+    </div>
+  </div>
+
+  <!-- RECORD -->
+  <div id="rec-view">
+    <video id="rec-video" autoplay playsinline muted></video>
+    <canvas id="rec-canvas"></canvas>
+    <div class="scan"></div>
+    <div id="rec-flash"></div>
+    <div id="cd-wrap">
+      <div class="cd-ring-wrap">
+        <svg viewBox="0 0 140 140" style="width:140px;height:140px">
+          <circle cx="70" cy="70" r="62" fill="none" stroke="#111" stroke-width="1"/>
+          <circle id="cd-ring" cx="70" cy="70" r="62" fill="none"
+            stroke="#c8a96e" stroke-width="1.5"
+            stroke-dasharray="389.6" stroke-dashoffset="0"
+            transform="rotate(-90 70 70)"
+            style="transition:stroke-dashoffset 1s linear"/>
+        </svg>
+        <div class="cd-num" id="cd-num">10</div>
+      </div>
+      <div class="cd-lbl">ENREGISTREMENT EN COURS</div>
+    </div>
+    <div class="cf"><div class="tl"></div><div class="tr"></div><div class="bl"></div><div class="br"></div></div>
+    <div class="hud tl"><div class="hud-logo">CORPUS MIROR</div></div>
+    <div class="hud tr">
+      <div class="hud-badge rec">MODE ENREGISTREMENT</div>
+      <button class="fs-btn" onclick="toggleFS()">⛶ PLEIN ÉCRAN</button>
+    </div>
+    <div class="hud bl"><div class="hud-status" id="rec-stat">EN ATTENTE DE POSTURE…</div></div>
+  </div>
+
+</div>
+
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
+<script>
+'use strict';
+
+// ── CONFIG ──────────────────────────────────────────────────────────────────
+const GESTURE_MS   = 1800;   // ms to hold gesture
+const RECORD_SECS  = 10;
+const MATCH_THRESH = 0.42;
+const CIRC         = 2 * Math.PI * 62; // 389.56
+
+const SKEL = [
+  [5,6],[5,7],[7,9],[6,8],[8,10],
+  [5,11],[6,12],[11,12],
+  [11,13],[13,15],[12,14],[14,16]
+];
+
+// ── STATE ────────────────────────────────────────────────────────────────────
+let detector=null, stream=null, animId=null;
+let modelReady=false, camReady=false;
+let mode=null; // 'observe' | 'record'
+let recordings=[];
+let currentPose=null;
+let matchTimer=0, lastMatchIdx=-1;
+let cdTimer=null, cdSec=0;
+let splashTimer=null, splashSec=5;
+let gzPct=0; // gesture zone fill %
+let splashGestureMode=null, splashGesturePct=0, splashGestureIv=null;
+let curX=window.innerWidth/2, curY=window.innerHeight/2;
+
+// ── HELPERS ──────────────────────────────────────────────────────────────────
+const $=id=>document.getElementById(id);
+const on=(el,e,fn)=>el&&el.addEventListener(e,fn);
+const toast=(msg,d=2500)=>{
+  const t=$('toast'); t.textContent=msg; t.classList.add('on');
+  setTimeout(()=>t.classList.remove('on'),d);
+};
+const toggleFS=()=>{
+  document.fullscreenElement
+    ? document.exitFullscreen().catch(()=>{})
+    : document.documentElement.requestFullscreen().catch(()=>{});
+};
+document.addEventListener('keydown',e=>{ if(e.key==='f'||e.key==='F') toggleFS(); });
+
+// ── CURSOR ───────────────────────────────────────────────────────────────────
+document.addEventListener('mousemove',e=>{
+  curX=e.clientX; curY=e.clientY; syncCursor();
+});
+function syncCursor(){
+  const c=$('cursor');
+  if(c){ c.style.left=curX+'px'; c.style.top=curY+'px'; }
+}
+function setCursorFromHand(nx,ny){
+  curX=(1-nx)*window.innerWidth;
+  curY=ny*window.innerHeight;
+  syncCursor();
+}
+
+// ── SPLASH AUTO-TIMER ────────────────────────────────────────────────────────
+function startSplashAuto(){
+  splashSec=5;
+  $('auto-ct').textContent=splashSec;
+  splashTimer=setInterval(()=>{
+    splashSec--;
+    $('auto-ct').textContent=splashSec;
+    if(splashSec<=0){ clearInterval(splashTimer); launchApp('observe'); }
+  },1000);
+}
+
+// Click fallback
+function pickMode(m){ clearInterval(splashTimer); launchApp(m); }
+
+// ── GESTURE ON SPLASH ────────────────────────────────────────────────────────
+function splashGestureCheck(){
+  if(!currentPose) { splashGestureCancel(); return; }
+  const kpts=currentPose.keypoints;
+  const vw=getVW(), vh=getVH();
+  const hPos=getHandPos(kpts,vw,vh);
+  if(!hPos) { splashGestureCancel(); return; }
+
+  setCursorFromHand(hPos.nx, hPos.ny);
+  $('cursor').classList.toggle('active',true);
+
+  // Map hand to screen to find which card is under cursor
+  const grid=$('mode-grid');
+  if(!grid) return;
+  const r=grid.getBoundingClientRect();
+  const mid=r.left+r.width/2;
+
+  let hovered=null;
+  if(curX>=r.left&&curX<=r.right&&curY>=r.top&&curY<=r.bottom){
+    hovered=curX<mid?'record':'observe';
+  }
+
+  if(hovered!==splashGestureMode){
+    splashGestureCancel();
+    splashGestureMode=hovered;
+    if(hovered) splashGestureStart(hovered);
+  }
+}
+
+function splashGestureStart(m){
+  splashGesturePct=0;
+  clearInterval(splashGestureIv);
+  splashGestureIv=setInterval(()=>{
+    splashGesturePct+=50/GESTURE_MS*100;
+    const fb=$('fb-'+m);
+    if(fb) fb.style.width=Math.min(splashGesturePct,100)+'%';
+    if(splashGesturePct>=100){
+      clearInterval(splashGestureIv);
+      clearInterval(splashTimer);
+      launchApp(m);
+    }
+  },50);
+}
+
+function splashGestureCancel(){
+  clearInterval(splashGestureIv);
+  splashGesturePct=0; splashGestureMode=null;
+  ['record','observe'].forEach(m=>{ const f=$('fb-'+m); if(f) f.style.width='0%'; });
+  const c=$('cursor'); if(c) c.classList.remove('active');
+}
+
+// ── LAUNCH ───────────────────────────────────────────────────────────────────
+async function launchApp(m){
+  $('splash').style.display='none';
+  $('app').classList.add('on');
+  if(!camReady) await initCamera();
+  if(!modelReady) return; // model loads in background
+  setMode(m);
+}
+
+function setMode(m){
+  mode=m;
+  if(m==='observe'){
+    clearCountdown();
+    $('rec-view').classList.remove('on');
+    $('obs-view').classList.add('on');
+    $('obs-ct').textContent=recordings.length;
+    lastMatchIdx=-1;
+    resetMatch();
+  } else {
+    $('obs-view').classList.remove('on');
+    $('rec-view').classList.add('on');
+    $('rec-stat').textContent='POSEZ-VOUS…';
+    startCountdown();
+  }
+}
+
+// ── CAMERA ───────────────────────────────────────────────────────────────────
+function getVW(){ const v=$('obs-video'); return v.videoWidth||640; }
+function getVH(){ const v=$('obs-video'); return v.videoHeight||480; }
+
+async function initCamera(){
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{width:{ideal:1280},height:{ideal:720},facingMode:'user'},audio:false
+    });
+    [$('obs-video'),$('rec-video')].forEach(v=>{
+      if(v){ v.srcObject=stream; v.play().catch(()=>{}); }
+    });
+    await new Promise(r=>{ $('obs-video').onloadedmetadata=r; });
+    camReady=true;
+  }catch(e){
+    toast('Accès caméra refusé');
+  }
+}
+
+// ── MODEL + LOOP ──────────────────────────────────────────────────────────────
+async function initModel(){
+  try{
+    await tf.setBackend('webgl');
+    detector=await poseDetection.createDetector(
+      poseDetection.SupportedModels.MoveNet,
+      {modelType:poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING}
+    );
+    modelReady=true;
+    runLoop();
+  }catch(e){
+    toast('Erreur chargement TensorFlow'); console.error(e);
+  }
+}
+
+function runLoop(){
+  const obsV=$('obs-video'), obsC=$('obs-canvas');
+  const recV=$('rec-video'), recC=$('rec-canvas');
+
+  async function frame(){
+    // Choose active video/canvas
+    const v=mode==='record'?recV:obsV;
+    const c=mode==='record'?recC:obsC;
+
+    if(v&&v.readyState>=2){
+      c.width=v.videoWidth; c.height=v.videoHeight;
+      const ctx=c.getContext('2d');
+      ctx.clearRect(0,0,c.width,c.height);
+
+      let poses=[];
+      try{ poses=await detector.estimatePoses(v); }catch(_){}
+
+      if(poses.length>0&&poses[0].score>0.22){
+        currentPose=poses[0];
+        const color=mode==='record'?'#c8a96e':'#6ea8c8';
+        drawSkel(ctx,currentPose.keypoints,color);
+
+        // Update cursor from hand
+        const hp=getHandPos(currentPose.keypoints,c.width,c.height);
+        if(hp){ setCursorFromHand(hp.nx,hp.ny); $('cursor').classList.add('active'); }
+        else $('cursor').classList.remove('active');
+
+        if(mode==='observe'){
+          doMatch(currentPose.keypoints);
+          obsGestureCheck(currentPose.keypoints,c.height);
+        }
+      } else {
+        currentPose=null;
+        $('cursor').classList.remove('active');
+        if(mode==='observe') obsGestureReset();
+      }
+    }
+
+    // Splash gesture detection even before mode is set
+    if(!mode&&currentPose) splashGestureCheck();
+    else if(!mode) splashGestureCancel();
+
+    animId=requestAnimationFrame(frame);
+  }
+  frame();
+}
+
+// ── HAND POSITION ─────────────────────────────────────────────────────────────
+function getHandPos(kpts,vw,vh){
+  const rw=kpts[16],lw=kpts[15];
+  let best=null;
+  [rw,lw].forEach(w=>{ if(w&&w.score>0.3&&(!best||w.score>best.score)) best=w; });
+  if(!best) return null;
+  return { nx:best.x/(vw||640), ny:best.y/(vh||480), x:best.x, y:best.y };
+}
+
+// ── SKELETON DRAWING ───────────────────────────────────────────────────────────
+function drawSkel(ctx,kpts,color){
+  ctx.strokeStyle=color; ctx.lineWidth=2; ctx.globalAlpha=0.8;
+  SKEL.forEach(([a,b])=>{
+    const ka=kpts[a],kb=kpts[b];
+    if(!ka||!kb||ka.score<0.22||kb.score<0.22) return;
+    ctx.beginPath();ctx.moveTo(ka.x,ka.y);ctx.lineTo(kb.x,kb.y);ctx.stroke();
+  });
+  kpts.forEach(k=>{
+    if(k.score<0.22) return;
+    ctx.fillStyle=color; ctx.globalAlpha=0.9;
+    ctx.beginPath();ctx.arc(k.x,k.y,4,0,Math.PI*2);ctx.fill();
+  });
+  ctx.globalAlpha=1;
+}
+
+// ── OBSERVE: GESTURE (RAISE HAND) ────────────────────────────────────────────
+function obsGestureCheck(kpts,vh){
+  const nose=kpts[0];
+  if(!nose||nose.score<0.25){ obsGestureReset(); return; }
+  // Either wrist clearly above nose
+  const rw=kpts[16],lw=kpts[15];
+  let raised=false;
+  [rw,lw].forEach(w=>{ if(w&&w.score>0.3&&w.y<nose.y-vh*0.08) raised=true; });
+
+  const prog=$('gz-prog'), lbl=$('gz-lbl');
+  if(raised){
+    gzPct=Math.min(gzPct+50/GESTURE_MS*100,100);
+    if(prog) prog.style.width=gzPct+'%';
+    if(lbl) lbl.classList.add('lit');
+    if(gzPct>=100){ gzPct=0; if(prog) prog.style.width='0%'; if(lbl) lbl.classList.remove('lit'); setMode('record'); }
+  } else {
+    obsGestureReset();
+  }
+}
+
+function obsGestureReset(){
+  gzPct=Math.max(0,gzPct-50/GESTURE_MS*100*2.5);
+  const prog=$('gz-prog'); if(prog) prog.style.width=gzPct+'%';
+  const lbl=$('gz-lbl'); if(lbl) lbl.classList.remove('lit');
+}
+
+// ── RECORD COUNTDOWN ──────────────────────────────────────────────────────────
+function startCountdown(){
+  clearCountdown(); cdSec=RECORD_SECS;
+  updateCD(cdSec); $('cd-wrap').classList.add('on');
+  cdTimer=setInterval(()=>{
+    cdSec--;
+    updateCD(cdSec);
+    if(cdSec<=0){ clearInterval(cdTimer); captureAndReturn(); }
+  },1000);
+}
+
+function clearCountdown(){
+  clearInterval(cdTimer); cdTimer=null;
+  const cw=$('cd-wrap'); if(cw) cw.classList.remove('on');
+}
+
+function updateCD(s){
+  const num=$('cd-num'), ring=$('cd-ring'), stat=$('rec-stat');
+  if(num) num.textContent=s;
+  if(ring) ring.style.strokeDashoffset=CIRC*(1-s/RECORD_SECS);
+  if(stat) stat.textContent=s>0?`CAPTURE DANS ${s}S…`:'CAPTURE EN COURS…';
+}
+
+async function captureAndReturn(){
+  if(!currentPose||currentPose.score<0.22){
+    toast('Aucune posture détectée — retour observation'); setTimeout(()=>setMode('observe'),1500); return;
+  }
+  const v=$('rec-video');
+  const snap=document.createElement('canvas');
+  snap.width=v.videoWidth; snap.height=v.videoHeight;
+  const sc=snap.getContext('2d');
+  sc.save(); sc.scale(-1,1); sc.drawImage(v,-snap.width,0); sc.restore();
+
+  recordings.push({ keypoints:currentPose.keypoints.map(k=>({...k})), snapshot:snap.toDataURL('image/jpeg',0.8) });
+
+  // Flash
+  const rf=$('rec-flash');
+  rf.style.transition='none'; rf.style.opacity='0.45';
+  setTimeout(()=>{ rf.style.transition='opacity 0.8s'; rf.style.opacity='0'; },50);
+
+  toast(`Posture ${recordings.length} enregistrée ✓`);
+  setTimeout(()=>{ clearCountdown(); setMode('observe'); },900);
+}
+
+// ── POSE MATCHING ─────────────────────────────────────────────────────────────
+function normPose(kpts){
+  const v=kpts.filter(k=>k.score>0.22);
+  if(v.length<4) return null;
+  const cx=v.reduce((s,k)=>s+k.x,0)/v.length, cy=v.reduce((s,k)=>s+k.y,0)/v.length;
+  const sc=Math.sqrt(v.reduce((s,k)=>s+(k.x-cx)**2+(k.y-cy)**2,0)/v.length)||1;
+  return kpts.map(k=>({...k,nx:k.score>0.22?(k.x-cx)/sc:0,ny:k.score>0.22?(k.y-cy)/sc:0}));
+}
+
+function cmpPose(a,b){
+  if(!a||!b) return 0;
+  let tot=0,cnt=0;
+  for(let i=5;i<17;i++){
+    const ka=a[i],kb=b[i];
+    if(!ka||!kb||ka.score<0.22||kb.score<0.22) continue;
+    tot+=Math.sqrt((ka.nx-kb.nx)**2+(ka.ny-kb.ny)**2); cnt++;
+  }
+  return cnt===0?0:Math.max(0,1-(tot/cnt)/1.5);
+}
+
+function doMatch(kpts){
+  if(!recordings.length) return;
+  const now=Date.now(); if(now-matchTimer<700) return; matchTimer=now;
+  const nc=normPose(kpts); if(!nc) return;
+  let best=0,bidx=-1;
+  recordings.forEach((r,i)=>{ const s=cmpPose(nc,normPose(r.keypoints)); if(s>best){best=s;bidx=i;} });
+
+  if(best>MATCH_THRESH&&bidx!==-1){
+    const rec=recordings[bidx];
+    const mr=$('match-reveal'), mi=$('match-img'), info=$('match-info');
+    if(mi){ mi.src=rec.snapshot; setTimeout(()=>mr&&mr.classList.add('on'),50); }
+    if(info) info.textContent=`CORRESPONDANCE ${Math.round(best*100)}% · POSTURE ${String(bidx+1).padStart(2,'0')}`;
+
+    if(bidx!==lastMatchIdx){
+      const f=$('obs-flash');
+      f.style.transition='none'; f.style.opacity='0.12';
+      setTimeout(()=>{ f.style.transition='opacity 1s'; f.style.opacity='0'; },50);
+      drawMatchOverlay(rec);
+    }
+    lastMatchIdx=bidx;
+  } else if(best<0.28){
+    resetMatch(); lastMatchIdx=-1;
+  }
+}
+
+function drawMatchOverlay(rec){
+  const mi=$('match-img'), oc=$('match-ov');
+  if(!oc||!mi) return;
+  const go=()=>{
+    oc.width=mi.naturalWidth||640; oc.height=mi.naturalHeight||480;
+    const mc=oc.getContext('2d');
+    mc.clearRect(0,0,oc.width,oc.height);
+    const kpts=rec.keypoints;
+    const v=kpts.filter(k=>k.score>0.22);
+    if(v.length<3) return;
+    const xs=v.map(k=>k.x),ys=v.map(k=>k.y);
+    const mnX=Math.min(...xs),mxX=Math.max(...xs),mnY=Math.min(...ys),mxY=Math.max(...ys);
+    const rX=mxX-mnX||1,rY=mxY-mnY||1,pad=50;
+    const tw=k=>pad+(k.x-mnX)/rX*(oc.width-pad*2);
+    const th=k=>pad+(k.y-mnY)/rY*(oc.height-pad*2);
+    mc.strokeStyle='#6ea8c8'; mc.lineWidth=2; mc.globalAlpha=0.6;
+    SKEL.forEach(([a,b])=>{
+      const ka=kpts[a],kb=kpts[b];
+      if(!ka||!kb||ka.score<0.22||kb.score<0.22) return;
+      mc.beginPath();mc.moveTo(tw(ka),th(ka));mc.lineTo(tw(kb),th(kb));mc.stroke();
+    });
+    kpts.forEach(k=>{
+      if(k.score<0.22) return;
+      mc.fillStyle='#6ea8c8'; mc.globalAlpha=0.9;
+      mc.beginPath();mc.arc(tw(k),th(k),3,0,Math.PI*2);mc.fill();
+    });
+  };
+  if(mi.complete&&mi.naturalWidth>0) go(); else mi.onload=go;
+}
+
+function resetMatch(){
+  const mr=$('match-reveal'); if(mr) mr.classList.remove('on');
+  const mi=$('match-img'); if(mi) mi.src='';
+  const info=$('match-info'); if(info) info.textContent='';
+}
+
+// ── BOOT ─────────────────────────────────────────────────────────────────────
+window.addEventListener('load',async()=>{
+  // Init camera immediately for splash gesture detection
+  await initCamera();
+  // Load model (starts loop when ready)
+  await initModel();
+  // Start splash auto-timer
+  startSplashAuto();
+});
+</script>
+</body>
+</html>

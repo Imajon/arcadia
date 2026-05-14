@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ARCADIA — 9 MAI</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; background:#000; overflow:hidden; font-family:'Courier New','Lucida Console',monospace; cursor:none; }
+canvas#bg { position:fixed; top:0; left:0; width:100%; height:100%; z-index:0; }
+#scanline {
+  position:fixed; top:0; left:0; width:100%; height:100%;
+  background:repeating-linear-gradient(to bottom,transparent 0px,transparent 2px,rgba(0,0,0,0.07) 2px,rgba(0,0,0,0.07) 4px);
+  z-index:2; pointer-events:none;
+}
+#vignette {
+  position:fixed; top:0; left:0; width:100%; height:100%;
+  background:radial-gradient(ellipse at center,transparent 50%,rgba(0,0,0,0.88) 100%);
+  z-index:3; pointer-events:none;
+}
+#statusbar { position:fixed; bottom:24px; left:32px; z-index:10; font-size:11px; letter-spacing:0.12em; opacity:0.45; color:#fff; text-transform:uppercase; }
+#clock     { position:fixed; top:24px; right:32px; z-index:10; font-size:12px; letter-spacing:0.2em; opacity:0.4; color:#fff; }
+#corner-tl { position:fixed; top:20px; left:24px; z-index:10; font-size:11px; letter-spacing:0.15em; opacity:0.3; color:#fff; text-transform:uppercase; }
+#webcam    { position:fixed; top:-9999px; left:-9999px; width:320px; height:240px; }
+#camstatus { position:fixed; bottom:24px; right:32px; z-index:10; font-size:10px; letter-spacing:0.1em; opacity:0.5; color:#fff; text-transform:uppercase; transition:color 0.5s; }
+#camstatus.active { color:#00ff9d; opacity:0.7; }
+#camstatus.error  { color:#ff4444; opacity:0.7; }
+</style>
+</head>
+<body>
+
+<canvas id="bg"></canvas>
+<video id="webcam" autoplay muted playsinline></video>
+<div id="scanline"></div>
+<div id="vignette"></div>
+<div id="statusbar">SYS::ARCADIA_V3 — STREAM ACTIF — <span id="fps">--</span> FPS</div>
+<div id="clock"></div>
+<div id="corner-tl">STUDIO EYA / 9 MAI</div>
+<div id="camstatus">CAM::INIT…</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// CANVAS
+// ═══════════════════════════════════════════════════════════
+const canvas = document.getElementById('bg');
+const ctx    = canvas.getContext('2d');
+let W, H;
+
+// ═══════════════════════════════════════════════════════════
+// MOTS-CLÉS
+// ═══════════════════════════════════════════════════════════
+const KEYWORDS = [
+  { text:'9 MAI',             weight:4 },
+  { text:'ARCADIA',           weight:5 },
+  { text:'ART NUMERIQUE',     weight:3 },
+  { text:'REALITE VIRTUELLE', weight:3 },
+  { text:'ARCADE',            weight:4 },
+  { text:'IMMERSIVE',         weight:4 },
+];
+
+// ═══════════════════════════════════════════════════════════
+// PALETTES CYCLIQUES
+// ═══════════════════════════════════════════════════════════
+const PALETTES = [
+  { base:'#00ff9d', accent:'#00d4ff', key:'#ff00c8' },
+  { base:'#ff6f00', accent:'#ffcc00', key:'#ff0055' },
+  { base:'#cc44ff', accent:'#8844ff', key:'#00ffcc' },
+  { base:'#44d9ff', accent:'#e0e0e0', key:'#ff6688' },
+  { base:'#aaff00', accent:'#00ff99', key:'#ff4444' },
+];
+let curPI=0, nxtPI=1, palBlend=0, palCycle=0;
+const PAL_DUR = 2200;
+
+function lerpHex(a, b, t) {
+  const ah=parseInt(a.slice(1,7),16), bh=parseInt(b.slice(1,7),16);
+  const ar=(ah>>16)&255, ag=(ah>>8)&255, ab=ah&255;
+  const br=(bh>>16)&255, bg=(bh>>8)&255, bb=bh&255;
+  return '#'+[ar+(br-ar)*t, ag+(bg-ag)*t, ab+(bb-ab)*t]
+    .map(v=>Math.round(v).toString(16).padStart(2,'0')).join('');
+}
+function getPal() {
+  const a=PALETTES[curPI], b=PALETTES[nxtPI], t=palBlend;
+  return {
+    base:  lerpHex(a.base,  b.base,  t),
+    accent:lerpHex(a.accent,b.accent,t),
+    key:   lerpHex(a.key,   b.key,   t),
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+// DÉTECTION DE MAINS
+// Chaque main a sa couleur propre, indépendante de la palette
+// ═══════════════════════════════════════════════════════════
+
+// Couleurs fixes par main (main 0 = cyan, main 1 = orange)
+const HAND_COLORS = ['#00e5ff', '#ff6600'];
+
+// Structure de mains détectées
+// hands[] = tableau de {points:[{x,y}], color, palmX, palmY}
+let hands = [];        // une entrée par main détectée
+let handPoints = [];   // tous les points d'influence aplatis [{x,y,r,color,handIdx}]
+
+const HAND_R    = 110;
+const REP_FORCE = 4.2;
+const DEF_DECAY = 0.86;
+
+const camEl = document.getElementById('webcam');
+const camSt = document.getElementById('camstatus');
+
+// Landmarks clés : poignet 0, paumes 1,5,9,13,17, bouts doigts 4,8,12,16,20
+const KEY_LM = [0,1,4,5,8,9,12,13,16,17,20];
+
+function initHands() {
+  if (!navigator.mediaDevices || !window.Hands) {
+    camSt.textContent = 'CAM::INDISPONIBLE';
+    camSt.classList.add('error');
+    return;
+  }
+
+  const mp = new Hands({ locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+  mp.setOptions({ maxNumHands:2, modelComplexity:0, minDetectionConfidence:0.6, minTrackingConfidence:0.5 });
+
+  mp.onResults(res => {
+    hands = [];
+    handPoints = [];
+    if (!res.multiHandLandmarks) return;
+
+    res.multiHandLandmarks.forEach((lms, hi) => {
+      const color = HAND_COLORS[hi % HAND_COLORS.length];
+      // Centre de la paume = landmark 9 (milieu de la main)
+      const palm = lms[9];
+      const palmX = (1 - palm.x) * W;
+      const palmY = palm.y * H;
+      const pts = [];
+      KEY_LM.forEach(idx => {
+        const lm = lms[idx];
+        const px = (1 - lm.x) * W;
+        const py = lm.y * H;
+        pts.push({ x:px, y:py });
+        handPoints.push({ x:px, y:py, r:HAND_R, color, handIdx:hi });
+      });
+      hands.push({ points:pts, color, palmX, palmY, idx:hi });
+    });
+  });
+
+  const cam = new Camera(camEl, {
+    onFrame: async () => { await mp.send({ image:camEl }); },
+    width:320, height:240
+  });
+  cam.start()
+    .then(() => { camSt.textContent='CAM::MAINS ACTIVES'; camSt.classList.add('active'); })
+    .catch(() => { camSt.textContent='CAM::ACCÈS REFUSÉ'; camSt.classList.add('error'); });
+}
+
+// Force de répulsion à un point (px,py)
+// Retourne aussi la couleur de la main la plus proche
+function repulsion(px, py) {
+  let dx=0, dy=0, nearColor=null, maxF=0;
+  for (const hp of handPoints) {
+    const ex=px-hp.x, ey=py-hp.y;
+    const d=Math.sqrt(ex*ex+ey*ey);
+    if (d<hp.r && d>1) {
+      const f = REP_FORCE * Math.pow(1-d/hp.r, 2.0);
+      dx += (ex/d)*f;
+      dy += (ey/d)*f;
+      if (f > maxF) { maxF=f; nearColor=hp.color; }
+    }
+  }
+  return { dx, dy, nearColor, mag: Math.sqrt(dx*dx+dy*dy) };
+}
+
+// ═══════════════════════════════════════════════════════════
+// PARTICULES INTER-MAINS
+// Voyagent d'un point de la main gauche à un point de la main droite
+// ═══════════════════════════════════════════════════════════
+let bridgeParticles = [];
+const BRIDGE_MAX = 40;
+
+function updBridgeParticles() {
+  // Supprimer les mortes
+  for (let i=bridgeParticles.length-1; i>=0; i--) {
+    const p = bridgeParticles[i];
+    p.t += p.spd;
+    if (p.t >= 1) { bridgeParticles.splice(i,1); continue; }
+    // Position le long du segment avec légère oscillation sinusoïdale perpendiculaire
+    const dx = p.tx - p.sx;
+    const dy = p.ty - p.sy;
+    const len = Math.sqrt(dx*dx+dy*dy);
+    const nx = -dy/len, ny = dx/len; // normale perpendiculaire
+    const wave = Math.sin(p.t * Math.PI * (2 + p.freq)) * p.amp;
+    p.x = p.sx + dx*p.t + nx*wave;
+    p.y = p.sy + dy*p.t + ny*wave;
+    p.life = Math.sin(p.t * Math.PI); // fade in/out
+    // Refresh char
+    if (Math.random() < 0.08) p.ch = rc();
+  }
+
+  // Spawner si 2 mains visibles
+  if (hands.length === 2 && bridgeParticles.length < BRIDGE_MAX) {
+    const h0 = hands[0], h1 = hands[1];
+    // On prend des points aléatoires sur chaque main
+    const p0 = h0.points[Math.floor(Math.random()*h0.points.length)];
+    const p1 = h1.points[Math.floor(Math.random()*h1.points.length)];
+    bridgeParticles.push({
+      sx: p0.x, sy: p0.y,
+      tx: p1.x, ty: p1.y,
+      x: p0.x, y: p0.y,
+      t: 0,
+      spd: 0.008 + Math.random()*0.014,
+      ch: rc(),
+      life: 0,
+      // Couleur qui interpole entre les deux mains
+      col0: h0.color,
+      col1: h1.color,
+      freq: 1 + Math.random()*2,   // fréquence sinusoïdale
+      amp:  8 + Math.random()*24,  // amplitude de l'oscillation
+    });
+  }
+}
+
+function drawBridgeParticles() {
+  if (!bridgeParticles.length) return;
+  ctx.font = `12px 'Courier New',monospace`;
+  for (const p of bridgeParticles) {
+    // Interpolation de couleur entre les deux mains
+    const color = lerpHex(p.col0, p.col1, p.t);
+    ctx.globalAlpha = p.life * 0.9;
+    ctx.shadowBlur = 0; // PAS de glow — style net
+    ctx.fillStyle = color;
+    ctx.fillText(p.ch, p.x, p.y);
+
+    // Trace fine semi-transparente derrière
+    ctx.globalAlpha = p.life * 0.15;
+    ctx.fillStyle = color;
+    ctx.fillText(p.ch, p.x - (p.tx-p.sx)*0.04, p.y - (p.ty-p.sy)*0.04);
+  }
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur  = 0;
+}
+
+// Dessiner la ligne de connexion entre les deux paumes (discret)
+function drawBridgeLine() {
+  if (hands.length !== 2) return;
+  const h0=hands[0], h1=hands[1];
+  ctx.save();
+  ctx.globalAlpha = 0.12;
+  ctx.strokeStyle = '#ffffff';
+  ctx.setLineDash([4,8]);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(h0.palmX, h0.palmY);
+  ctx.lineTo(h1.palmX, h1.palmY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════
+// STREAMS — pluie de caractères
+// ═══════════════════════════════════════════════════════════
+const FS = 14;
+let cols, rows, streams = [];
+
+const CL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;:,.<>?/~`\\';
+const CJ = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン';
+const CS = '░▒▓│┤╣║╗╝┐└┴┬├─┼╚╔╩╦╠═╬┘┌';
+function rc() {
+  const r=Math.random();
+  if(r<0.5) return CL[Math.floor(Math.random()*CL.length)];
+  if(r<0.8) return CJ[Math.floor(Math.random()*CJ.length)];
+  return CS[Math.floor(Math.random()*CS.length)];
+}
+
+function mkStream(col, rand) {
+  const len=6+Math.floor(Math.random()*22);
+  const spd=0.4+Math.random()*1.2;
+  const y=rand?Math.random()*-rows:-len;
+  let kw=null;
+  if(Math.random()<0.09){
+    const pool=[];
+    KEYWORDS.forEach(k=>{for(let i=0;i<k.weight;i++) pool.push(k.text);});
+    kw=pool[Math.floor(Math.random()*pool.length)];
+  }
+  return { col,y,len,spd, chars:[],kw,kwp:0,glitch:0, dvx:0,dvy:0,dx:0,dy:0 };
+}
+function initStreams() {
+  cols=Math.floor(W/FS); rows=Math.floor(H/FS);
+  streams=[];
+  for(let c=0;c<cols;c++) streams.push(mkStream(c,true));
+}
+
+// Étincelles
+let sparks=[];
+function addSparks(x,y,color,n=2){
+  for(let i=0;i<n;i++) sparks.push({
+    x,y,
+    vx:(Math.random()-0.5)*7,
+    vy:-2-Math.random()*4,
+    life:1, ch:rc(), col:color
+  });
+}
+
+function updStream(s) {
+  while(s.chars.length<s.len) s.chars.push(rc());
+  if(Math.random()<0.3) s.chars[Math.floor(Math.random()*s.chars.length)]=rc();
+  s.glitch=Math.random()<0.002?3:Math.max(0,s.glitch-1);
+
+  const hx=s.col*FS+s.dx;
+  const hy=Math.floor(s.y)*FS;
+
+  const rep=repulsion(hx,hy);
+  s.dvx=(s.dvx+rep.dx*0.55)*DEF_DECAY;
+  s.dvy=(s.dvy+rep.dy*0.40)*DEF_DECAY;
+  s.dx=s.dx*0.93+s.dvx;
+  s.dy+=s.dvy;
+
+  if(rep.mag>0.9 && Math.random()<0.35) {
+    addSparks(hx,hy, rep.nearColor||'#ffffff');
+  }
+
+  s.y+=s.spd*Math.max(0.1,1-Math.abs(s.dvy)*0.35);
+
+  if(s.y-s.len>rows+2){
+    const ns=mkStream(s.col,false);
+    ns.dx=s.dx; ns.dvx=s.dvx;
+    Object.assign(s,ns); s.chars=[];
+  }
+}
+
+function drawStreams(pal) {
+  ctx.font=`${FS}px 'Courier New',monospace`;
+  for(const s of streams){
+    const bx=s.col*FS+s.dx;
+    for(let i=0;i<s.len;i++){
+      const row=Math.floor(s.y)-i;
+      if(row<0||row>rows) continue;
+      const py=row*FS+s.dy;
+      const frac=1-i/s.len;
+
+      // Vérifier si proche d'une main (pour colorer la tête)
+      let nearColor=null, nearDist=Infinity;
+      for(const hp of handPoints){
+        const ex=bx-hp.x, ey=py-hp.y;
+        const d=Math.sqrt(ex*ex+ey*ey);
+        if(d<hp.r*0.55 && d<nearDist){ nearDist=d; nearColor=hp.color; }
+      }
+
+      let color;
+      ctx.shadowBlur=0;
+      if(i===0){
+        color = nearColor || (s.glitch>0?pal.accent:'#ffffff');
+        if(nearColor){ ctx.shadowColor=nearColor; ctx.shadowBlur=10; }
+        else { ctx.shadowColor=pal.base; ctx.shadowBlur=8; }
+      } else {
+        const a=Math.pow(frac,1.6);
+        color=frac>0.65?pal.base:pal.base+Math.floor(a*80).toString(16).padStart(2,'0');
+      }
+
+      let ch=s.chars[i]||rc();
+      if(s.kw&&i===0){
+        ch=s.kw[s.kwp%s.kw.length];
+        if(Math.random()<0.05) s.kwp++;
+        color=pal.key;
+        ctx.shadowColor=pal.key; ctx.shadowBlur=10;
+      }
+
+      ctx.fillStyle=color;
+      ctx.fillText(ch, bx+(s.glitch>0?(Math.random()-0.5)*5:0), py);
+    }
+    ctx.shadowBlur=0;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ÉTINCELLES
+// ═══════════════════════════════════════════════════════════
+function updSparks(){
+  for(let i=sparks.length-1;i>=0;i--){
+    const sp=sparks[i];
+    sp.x+=sp.vx; sp.y+=sp.vy; sp.vy+=0.2; sp.life-=0.038;
+    if(sp.life<=0) sparks.splice(i,1);
+  }
+}
+function drawSparks(){
+  ctx.font=`11px 'Courier New',monospace`;
+  ctx.shadowBlur=0;
+  for(const sp of sparks){
+    ctx.globalAlpha=sp.life;
+    ctx.fillStyle=sp.col;
+    ctx.fillText(sp.ch,sp.x,sp.y);
+  }
+  ctx.globalAlpha=1;
+}
+
+// ═══════════════════════════════════════════════════════════
+// AURA MAINS — couleur distincte par main, pas de glow excessif
+// ═══════════════════════════════════════════════════════════
+let auraPhase=0;
+function drawHandAuras(){
+  if(!handPoints.length) return;
+  auraPhase+=0.035;
+
+  // Un cercle d'aura par main (centré sur la paume)
+  for(const hand of hands){
+    const pulse=0.7+0.3*Math.sin(auraPhase + hand.idx*Math.PI);
+    const cx=hand.palmX, cy=hand.palmY;
+    const col=hand.color;
+
+    // Halo très discret — pas de glow, juste de la transparence
+    const g=ctx.createRadialGradient(cx,cy,2,cx,cy,HAND_R*pulse);
+    g.addColorStop(0,   col+'28');
+    g.addColorStop(0.5, col+'0a');
+    g.addColorStop(1,   col+'00');
+    ctx.fillStyle=g;
+    ctx.beginPath(); ctx.arc(cx,cy,HAND_R*pulse,0,Math.PI*2); ctx.fill();
+
+    // Contour du rayon — ligne fine
+    ctx.strokeStyle=col+'30';
+    ctx.lineWidth=1;
+    ctx.beginPath(); ctx.arc(cx,cy,HAND_R,0,Math.PI*2); ctx.stroke();
+
+    // Points sur les landmarks clés — petits points nets, sans glow
+    ctx.shadowBlur=0;
+    hand.points.forEach((pt,i)=>{
+      // Seulement bout des doigts (idx 2,4,6,8,10 dans KEY_LM = landmarks 4,8,12,16,20)
+      if(i===2||i===4||i===6||i===8||i===10){
+        ctx.fillStyle=col+'cc';
+        ctx.beginPath(); ctx.arc(pt.x,pt.y,3,0,Math.PI*2); ctx.fill();
+      }
+    });
+
+    // Point paume central plus visible
+    ctx.fillStyle=col+'ee';
+    ctx.beginPath(); ctx.arc(cx,cy,5,0,Math.PI*2); ctx.fill();
+
+    // Étiquette main (très discrète)
+    ctx.font=`9px 'Courier New',monospace`;
+    ctx.fillStyle=col+'88';
+    ctx.fillText(hand.idx===0?'[L]':'[R]', cx+8, cy-8);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// MOTS-CLÉS FLOTTANTS — sans glow, style flat net
+// Les mots créent aussi une zone de répulsion pour les streams
+// ═══════════════════════════════════════════════════════════
+let fWords=[];
+
+// Zone de répulsion des mots (mise à jour chaque frame)
+let wordRepZones = []; // [{x,y,r}]
+
+function spawnFW(){
+  if(fWords.length>8) return;
+  const pool=[];
+  KEYWORDS.forEach(k=>{for(let i=0;i<k.weight;i++) pool.push(k.text);});
+  const text=pool[Math.floor(Math.random()*pool.length)];
+  fWords.push({
+    text,
+    x:0.1+Math.random()*0.8, y:0.1+Math.random()*0.8,
+    fs:15+Math.floor(Math.random()*32),
+    op:0, ph:'in', t:0,
+    drift:(Math.random()-0.5)*0.00015,
+    // Pas de glitch, pas de glow — affichage sec
+    // Couleur choisie dans un set limité, net
+    col: ['#e8e8e8','#c0c0c0','#a0a0a0','#ffffff'][Math.floor(Math.random()*4)],
+    // Largeur estimée (pour zone répulsion)
+    estW: text.length * 9,
+  });
+}
+
+function updFW(){
+  wordRepZones=[];
+  for(let i=fWords.length-1;i>=0;i--){
+    const w=fWords[i]; w.y+=w.drift; w.t++;
+    if(w.ph==='in'){w.op=Math.min(0.85,w.op+0.012);if(w.op>=0.8)w.ph='hold';}
+    if(w.ph==='hold'){if(w.t>250+Math.random()*350)w.ph='out';}
+    if(w.ph==='out'){w.op=Math.max(0,w.op-0.006);if(w.op<=0){fWords.splice(i,1);continue;}}
+
+    // Zone de répulsion centrée sur le mot (si visible)
+    if(w.op>0.1){
+      const wx=w.x*W, wy=w.y*H;
+      const halfW=w.estW/2+20, halfH=w.fs/2+10;
+      // On crée plusieurs points de répulsion pour couvrir la largeur du mot
+      const nPts=Math.ceil(w.estW/30);
+      for(let p=0;p<=nPts;p++){
+        wordRepZones.push({
+          x: wx - w.estW/2 + (w.estW/nPts)*p,
+          y: wy,
+          r: halfH + 30,
+          force: 2.5 * w.op,
+        });
+      }
+    }
+  }
+  if(Math.random()<0.005) spawnFW();
+}
+
+// Répulsion combinée main + mots
+function repulsionFull(px, py){
+  let dx=0, dy=0, nearColor=null, maxF=0;
+
+  // Mains
+  for(const hp of handPoints){
+    const ex=px-hp.x, ey=py-hp.y;
+    const d=Math.sqrt(ex*ex+ey*ey);
+    if(d<hp.r && d>1){
+      const f=REP_FORCE*Math.pow(1-d/hp.r,2.0);
+      dx+=(ex/d)*f; dy+=(ey/d)*f;
+      if(f>maxF){maxF=f; nearColor=hp.color;}
+    }
+  }
+
+  // Mots flottants
+  for(const wz of wordRepZones){
+    const ex=px-wz.x, ey=py-wz.y;
+    const d=Math.sqrt(ex*ex+ey*ey);
+    if(d<wz.r && d>1){
+      const f=wz.force*Math.pow(1-d/wz.r,1.5);
+      dx+=(ex/d)*f; dy+=(ey/d)*f;
+    }
+  }
+
+  const mag=Math.sqrt(dx*dx+dy*dy);
+  return { dx, dy, nearColor, mag };
+}
+
+function drawFW(){
+  ctx.shadowBlur=0; // AUCUN glow sur les mots
+  for(const w of fWords){
+    if(w.op<=0) continue;
+    const x=w.x*W, y=w.y*H;
+    ctx.globalAlpha=w.op;
+    ctx.font=`${w.fs}px 'Courier New',monospace`;
+    ctx.letterSpacing='0.05em';
+
+    // Fond sombre minimal (pas de glow, juste lisibilité)
+    ctx.fillStyle='rgba(0,0,0,0.5)';
+    // Rectangle de fond très subtil
+    const tw=ctx.measureText(w.text).width;
+    ctx.fillRect(x-tw/2-4, y-w.fs, tw+8, w.fs+4);
+
+    // Texte net, flat
+    ctx.fillStyle=w.col;
+    ctx.fillText(w.text, x-tw/2, y);
+
+    // Ligne sous le mot — trait fin, pas de glow
+    ctx.globalAlpha=w.op*0.3;
+    ctx.strokeStyle=w.col;
+    ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(x-tw/2,y+2); ctx.lineTo(x+tw/2,y+2); ctx.stroke();
+  }
+  ctx.globalAlpha=1;
+  ctx.shadowBlur=0;
+}
+
+// ═══════════════════════════════════════════════════════════
+// LIGNES TERMINALES HORIZONTALES
+// ═══════════════════════════════════════════════════════════
+let hLines=[];
+const TPFX=['> INIT','>> EXEC','[SYS]','[NET]','>>> RUN','[LOG]','LOAD::','PROC::','SCAN::','FLUX::','LINK::','DATA::'];
+const TVRB=['render','compile','stream','decode','sync','analyze','process','inject','project','map','generate','trace'];
+const TNON=['module','layer','fragment','node','sequence','matrix','vector','signal','channel','instance','frame','entity'];
+function genTL(){
+  const p=TPFX[Math.floor(Math.random()*TPFX.length)];
+  const v=TVRB[Math.floor(Math.random()*TVRB.length)];
+  const n=TNON[Math.floor(Math.random()*TNON.length)];
+  const h=Math.floor(Math.random()*0xFFFFFF).toString(16).toUpperCase().padStart(6,'0');
+  const d=Math.floor(Math.random()*9999).toString().padStart(4,'0');
+  return `${p} ${v.toUpperCase()}_${n.toUpperCase()} [0x${h}] (${d})`;
+}
+function spawnHL(){
+  if(hLines.length>6) return;
+  hLines.push({y:Math.floor(Math.random()*rows),opacity:0,phase:'in',text:genTL(),scroll:0,spd:0.5+Math.random()*0.8,t:0});
+}
+function updHL(){
+  for(let i=hLines.length-1;i>=0;i--){
+    const h=hLines[i]; h.scroll+=h.spd;
+    if(h.phase==='in'){h.opacity=Math.min(1,h.opacity+0.04);if(h.opacity>=1)h.phase='hold';}
+    if(h.phase==='hold'){h.t++;if(h.t>120)h.phase='out';}
+    if(h.phase==='out'){h.opacity=Math.max(0,h.opacity-0.025);if(h.opacity<=0)hLines.splice(i,1);}
+  }
+  if(Math.random()<0.008) spawnHL();
+}
+function drawHL(pal){
+  ctx.font=`12px 'Courier New',monospace`;
+  ctx.shadowBlur=0;
+  for(const h of hLines){
+    ctx.globalAlpha=h.opacity*0.55;
+    ctx.fillStyle=pal.accent;
+    ctx.fillText(h.text,-(h.scroll%(W+800))+100,h.y*FS);
+  }
+  ctx.globalAlpha=1;
+}
+
+// ═══════════════════════════════════════════════════════════
+// GLITCH GLOBAL
+// ═══════════════════════════════════════════════════════════
+let gGlitch=0;
+function trigGlitch(){gGlitch=8+Math.floor(Math.random()*12);}
+function drawGlitch(){
+  if(gGlitch<=0) return;
+  for(let i=0;i<Math.floor(gGlitch/2);i++){
+    try{
+      const sy=Math.random()*H, sh=2+Math.random()*12, sx=(Math.random()-0.5)*40;
+      ctx.putImageData(ctx.getImageData(0,sy,W,sh),sx,sy);
+    }catch(e){}
+  }
+  gGlitch--;
+}
+
+// ═══════════════════════════════════════════════════════════
+// BOUCLE PRINCIPALE
+// ═══════════════════════════════════════════════════════════
+const fpsEl=document.getElementById('fps');
+const clockEl=document.getElementById('clock');
+let lt=0, fc=0, ft=0;
+
+function updClock(){
+  const n=new Date();
+  if(clockEl) clockEl.textContent=[n.getHours(),n.getMinutes(),n.getSeconds()].map(v=>v.toString().padStart(2,'0')).join(':');
+}
+
+function loop(ts){
+  const dt=ts-lt; lt=ts; fc++; ft+=dt; palCycle++;
+  if(ft>1000){ if(fpsEl) fpsEl.textContent=Math.round(fc*1000/ft); fc=0;ft=0;updClock(); }
+
+  palBlend=(palCycle%PAL_DUR)/PAL_DUR;
+  if(palCycle%PAL_DUR===0){ curPI=nxtPI; nxtPI=(nxtPI+1)%PALETTES.length; }
+  const pal=getPal();
+
+  // Fond persistant
+  ctx.fillStyle='rgba(0,0,0,0.082)';
+  ctx.fillRect(0,0,W,H);
+
+  // Update états
+  updFW();            // met à jour wordRepZones avant les streams
+  streams.forEach(s=>{
+    // Utilise repulsionFull (mains + mots)
+    while(s.chars.length<s.len) s.chars.push(rc());
+    if(Math.random()<0.3) s.chars[Math.floor(Math.random()*s.chars.length)]=rc();
+    s.glitch=Math.random()<0.002?3:Math.max(0,s.glitch-1);
+    const hx=s.col*FS+s.dx, hy=Math.floor(s.y)*FS;
+    const rep=repulsionFull(hx,hy);
+    s.dvx=(s.dvx+rep.dx*0.55)*DEF_DECAY;
+    s.dvy=(s.dvy+rep.dy*0.40)*DEF_DECAY;
+    s.dx=s.dx*0.93+s.dvx;
+    s.dy+=s.dvy;
+    if(rep.mag>0.9&&Math.random()<0.35) addSparks(hx,hy,rep.nearColor||'#ffffff');
+    s.y+=s.spd*Math.max(0.1,1-Math.abs(s.dvy)*0.35);
+    if(s.y-s.len>rows+2){ const ns=mkStream(s.col,false); ns.dx=s.dx;ns.dvx=s.dvx; Object.assign(s,ns);s.chars=[]; }
+  });
+  updSparks();
+  updHL();
+  updBridgeParticles();
+  if(Math.random()<0.001) trigGlitch();
+
+  // Draw — ordre des couches
+  drawHandAuras();       // auras derrière tout
+  drawBridgeLine();      // ligne inter-mains
+  drawStreams(pal);      // pluie
+  drawSparks();          // étincelles
+  drawHL(pal);           // lignes terminales
+  drawFW();              // mots-clés (SANS glow)
+  drawBridgeParticles(); // particules inter-mains (au dessus des mots)
+  drawGlitch();
+
+  requestAnimationFrame(loop);
+}
+
+function resize(){
+  W=canvas.width=window.innerWidth;
+  H=canvas.height=window.innerHeight;
+  initStreams();
+}
+window.addEventListener('resize',resize);
+resize();
+for(let i=0;i<5;i++) spawnFW();
+for(let i=0;i<3;i++) spawnHL();
+requestAnimationFrame(loop);
+
+window.addEventListener('load',()=>{ setTimeout(initHands,600); });
+document.addEventListener('dblclick',()=>{
+  if(!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+  else document.exitFullscreen?.();
+});
+</script>
+</body>
+</html>

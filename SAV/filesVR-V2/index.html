@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VR TAG</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/aframe/1.5.0/aframe.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Space+Mono&display=swap');
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { background:#000; overflow:hidden; font-family:'Orbitron',monospace; }
+    #timer-display {
+      position:fixed; top:20px; left:50%; transform:translateX(-50%);
+      font-size:52px; font-weight:900; color:#fff; letter-spacing:4px;
+      text-shadow:0 0 20px #00f5ff, 0 0 40px #00f5ff88; z-index:999; pointer-events:none;
+    }
+    #timer-display.urgent { color:#ff2244; text-shadow:0 0 20px #ff2244; animation:pulse .5s infinite alternate; }
+    @keyframes pulse { from{opacity:1} to{opacity:.6} }
+    #status-text {
+      position:fixed; bottom:60px; left:50%; transform:translateX(-50%);
+      font-size:18px; font-weight:700; color:#fff; letter-spacing:2px;
+      text-shadow:0 0 15px currentColor; z-index:999; pointer-events:none;
+    }
+    #status-text.is-it  { color:#ff2244; text-shadow:0 0 20px #ff2244; }
+    #status-text.not-it { color:#00f5ff; text-shadow:0 0 20px #00f5ff; }
+    #scores {
+      position:fixed; top:20px; right:24px; z-index:999;
+      font-family:'Space Mono',monospace; font-size:13px; color:#aaa; text-align:right; pointer-events:none;
+    }
+    .score-entry.me { color:#fff; }
+    #crosshair {
+      position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+      width:20px; height:20px; pointer-events:none; z-index:999;
+    }
+    #crosshair::before,#crosshair::after {
+      content:''; position:absolute; background:rgba(255,255,255,.8); border-radius:1px;
+    }
+    #crosshair::before { width:2px; height:100%; left:50%; top:0; transform:translateX(-50%); }
+    #crosshair::after  { width:100%; height:2px; top:50%; left:0; transform:translateY(-50%); }
+    #ammo-bar {
+      position:fixed; bottom:28px; left:50%; transform:translateX(-50%);
+      display:flex; gap:8px; z-index:999; pointer-events:none;
+    }
+    .ammo-dot {
+      width:10px; height:10px; border-radius:50%;
+      background:#00f5ff; box-shadow:0 0 8px #00f5ff; transition:all .2s;
+    }
+    .ammo-dot.empty { background:transparent; border:1px solid #333; box-shadow:none; }
+    #overlay {
+      position:fixed; inset:0; z-index:2000;
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      background:rgba(0,0,0,.88); backdrop-filter:blur(10px); transition:opacity .5s;
+    }
+    #overlay.hidden { opacity:0; pointer-events:none; }
+    #overlay-title {
+      font-size:clamp(40px,10vw,72px); font-weight:900; letter-spacing:8px;
+      color:#fff; text-shadow:0 0 40px #00f5ff,0 0 80px #00f5ff44; margin-bottom:16px;
+    }
+    #overlay-sub {
+      font-family:'Space Mono',monospace; font-size:15px; color:#00f5ff;
+      letter-spacing:3px; text-align:center; line-height:2; max-width:500px; padding:0 20px;
+    }
+    #overlay-badge {
+      margin-top:32px; padding:10px 28px;
+      border:1px solid #00f5ff33; color:#666;
+      font-family:'Space Mono',monospace; font-size:12px; letter-spacing:3px;
+    }
+    #fire-flash {
+      position:fixed; inset:0; z-index:1500;
+      pointer-events:none; background:#fff; opacity:0; transition:opacity .05s;
+    }
+    #fire-flash.flash { opacity:.08; }
+    #desktop-hud { pointer-events:none; }
+  </style>
+</head>
+<body>
+
+<div id="desktop-hud">
+  <div id="timer-display">--</div>
+  <div id="status-text">En attente...</div>
+  <div id="scores"></div>
+  <div id="crosshair"></div>
+  <div id="ammo-bar"></div>
+</div>
+<div id="fire-flash"></div>
+
+<div id="overlay">
+  <div id="overlay-title">VR TAG</div>
+  <div id="overlay-sub">Connexion au serveur...</div>
+  <div id="overlay-badge">EN ATTENTE</div>
+</div>
+
+<a-scene
+  id="scene"
+  background="color:#050510"
+  renderer="antialias:true;colorManagement:true"
+  vr-mode-ui="enabled:true"
+  loading-screen="enabled:false"
+  webxr="requiredFeatures:local-floor;optionalFeatures:bounded-floor,hand-tracking"
+>
+  <a-assets timeout="10000"></a-assets>
+
+  <!-- Lighting -->
+  <a-light type="ambient"     color="#0a0a22" intensity="1.5"></a-light>
+  <a-light type="directional" position="4 8 4" color="#eeeeff" intensity="0.6"></a-light>
+  <a-light type="point" position="0 3.5 0"  color="#00f5ff" intensity="0.5" distance="15"></a-light>
+  <a-light type="point" position="-6 3 -6"  color="#aa00ff" intensity="0.3" distance="8"></a-light>
+  <a-light type="point" position=" 6 3  6"  color="#aa00ff" intensity="0.3" distance="8"></a-light>
+
+  <!-- Floor -->
+  <a-plane rotation="-90 0 0" width="30" height="30"
+    material="color:#08081a;roughness:0.9;metalness:0.1"></a-plane>
+
+  <!-- Grid -->
+  <a-box position="-6 0.01 0" width="0.02" height="0.01" depth="16" material="color:#00f5ff;opacity:.08;transparent:true"></a-box>
+  <a-box position=" 0 0.01 0" width="0.02" height="0.01" depth="16" material="color:#00f5ff;opacity:.10;transparent:true"></a-box>
+  <a-box position=" 6 0.01 0" width="0.02" height="0.01" depth="16" material="color:#00f5ff;opacity:.08;transparent:true"></a-box>
+  <a-box position="0 0.01 -6" width="16" height="0.01" depth="0.02" material="color:#00f5ff;opacity:.08;transparent:true"></a-box>
+  <a-box position="0 0.01  0" width="16" height="0.01" depth="0.02" material="color:#00f5ff;opacity:.10;transparent:true"></a-box>
+  <a-box position="0 0.01  6" width="16" height="0.01" depth="0.02" material="color:#00f5ff;opacity:.08;transparent:true"></a-box>
+
+  <!-- Arena border glow -->
+  <a-box position="0 0.02 -7.5" width="15" height="0.04" depth="0.04" material="color:#00f5ff;emissive:#00f5ff;emissiveIntensity:1;opacity:.5;transparent:true"></a-box>
+  <a-box position="0 0.02  7.5" width="15" height="0.04" depth="0.04" material="color:#00f5ff;emissive:#00f5ff;emissiveIntensity:1;opacity:.5;transparent:true"></a-box>
+  <a-box position="-7.5 0.02 0" width="0.04" height="0.04" depth="15" material="color:#00f5ff;emissive:#00f5ff;emissiveIntensity:1;opacity:.5;transparent:true"></a-box>
+  <a-box position=" 7.5 0.02 0" width="0.04" height="0.04" depth="15" material="color:#00f5ff;emissive:#00f5ff;emissiveIntensity:1;opacity:.5;transparent:true"></a-box>
+
+  <!-- Corner pillars -->
+  <a-cylinder position="-6 1.5 -6" radius="0.14" height="3" material="color:#0d1530;roughness:.2;metalness:.9"></a-cylinder>
+  <a-sphere   position="-6 3.1 -6" radius="0.17" material="color:#00f5ff;emissive:#00f5ff;emissiveIntensity:1"></a-sphere>
+  <a-cylinder position=" 6 1.5 -6" radius="0.14" height="3" material="color:#0d1530;roughness:.2;metalness:.9"></a-cylinder>
+  <a-sphere   position=" 6 3.1 -6" radius="0.17" material="color:#00f5ff;emissive:#00f5ff;emissiveIntensity:1"></a-sphere>
+  <a-cylinder position="-6 1.5  6" radius="0.14" height="3" material="color:#0d1530;roughness:.2;metalness:.9"></a-cylinder>
+  <a-sphere   position="-6 3.1  6" radius="0.17" material="color:#00f5ff;emissive:#00f5ff;emissiveIntensity:1"></a-sphere>
+  <a-cylinder position=" 6 1.5  6" radius="0.14" height="3" material="color:#0d1530;roughness:.2;metalness:.9"></a-cylinder>
+  <a-sphere   position=" 6 3.1  6" radius="0.17" material="color:#00f5ff;emissive:#00f5ff;emissiveIntensity:1"></a-sphere>
+
+  <!-- Center ring -->
+  <a-torus position="0 0.05 0" radius="1.2" radius-tubular="0.03" rotation="-90 0 0"
+    material="color:#00f5ff;emissive:#00f5ff;emissiveIntensity:.5;opacity:.4;transparent:true"
+    animation="property:rotation;from:-90 0 0;to:-90 360 0;dur:20000;loop:true;easing:linear">
+  </a-torus>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!-- PLAYER RIG                                       -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <a-entity id="rig" position="0 0 3" vr-rig>
+
+    <!-- Camera (desktop look + wasd) -->
+    <a-camera id="camera"
+      look-controls="pointerLockEnabled:true"
+      wasd-controls="speed:3;fly:false"
+      position="0 1.65 0">
+
+      <!-- Desktop gun (hidden in VR) -->
+      <a-entity id="desktop-gun" position="0.28 -0.22 -0.45">
+        <a-box width="0.055" height="0.07" depth="0.26"
+          material="color:#0d1530;roughness:.1;metalness:.95"></a-box>
+        <a-cylinder radius="0.02" height="0.2" rotation="90 0 0" position="0 .01 -.2"
+          material="color:#1a2a4a;roughness:.05;metalness:1"></a-cylinder>
+        <a-sphere radius="0.026" position="0 .01 -.31"
+          material="color:#00f5ff;emissive:#00f5ff;emissiveIntensity:1"
+          animation="property:material.emissiveIntensity;from:1;to:.3;dur:800;dir:alternate;loop:true">
+        </a-sphere>
+      </a-entity>
+    </a-camera>
+
+    <!-- RIGHT CONTROLLER — trigger fires -->
+    <a-entity id="right-hand"
+      oculus-touch-controls="hand:right"
+      vive-focus-controls="hand:right"
+      vive-controls="hand:right"
+      windows-motion-controls="hand:right"
+      vr-fire>
+
+      <!-- VR gun model -->
+      <a-entity position="0 0 -0.05" rotation="-15 0 0">
+        <a-box width="0.05" height="0.06" depth="0.22"
+          material="color:#0d1530;roughness:.1;metalness:.95"></a-box>
+        <a-cylinder radius="0.018" height="0.18" rotation="90 0 0" position="0 .008 -.18"
+          material="color:#1a2a4a;roughness:.05;metalness:1"></a-cylinder>
+        <!-- Barrel tip -->
+        <a-sphere id="vr-tip" radius="0.022" position="0 .008 -.27"
+          material="color:#00f5ff;emissive:#00f5ff;emissiveIntensity:1"
+          animation="property:material.emissiveIntensity;from:1;to:.2;dur:700;dir:alternate;loop:true">
+        </a-sphere>
+        <!-- Laser line -->
+        <a-cylinder radius="0.003" height="8" rotation="90 0 0" position="0 .008 -4.27"
+          material="color:#00f5ff;emissive:#00f5ff;emissiveIntensity:.5;opacity:.2;transparent:true">
+        </a-cylinder>
+      </a-entity>
+    </a-entity>
+
+    <!-- LEFT CONTROLLER — thumbstick moves -->
+    <a-entity id="left-hand"
+      oculus-touch-controls="hand:left"
+      vive-focus-controls="hand:left"
+      vive-controls="hand:left"
+      windows-motion-controls="hand:left"
+      vr-move>
+    </a-entity>
+
+  </a-entity>
+
+  <!-- Remote players -->
+  <a-entity id="players-container"></a-entity>
+  <!-- Balls -->
+  <a-entity id="balls-container"></a-entity>
+
+  <!-- VR world-space HUD panel (floats above arena) -->
+  <a-entity id="vr-hud-anchor" position="0 4.5 -4">
+    <a-plane width="2.5" height="0.7"
+      material="color:#000;opacity:.75;transparent:true"></a-plane>
+    <a-text id="vr-status-text" value="VR TAG" align="center"
+      color="#00f5ff" width="5" position="0 0.1 0.01"></a-text>
+    <a-text id="vr-timer-text" value="--s" align="center"
+      color="#fff" width="4" position="0 -0.15 0.01"></a-text>
+  </a-entity>
+
+  <a-sky color="#020208"></a-sky>
+</a-scene>
+
+<script>
+// ─────────────────────────────────────────────────────────────
+// COMPONENTS
+// ─────────────────────────────────────────────────────────────
+
+// VR rig: hide desktop elements in VR
+AFRAME.registerComponent('vr-rig', {
+  init() {
+    this.el.sceneEl.addEventListener('enter-vr', () => {
+      document.getElementById('desktop-gun').setAttribute('visible', false);
+      document.getElementById('desktop-hud').style.display = 'none';
+    });
+    this.el.sceneEl.addEventListener('exit-vr', () => {
+      document.getElementById('desktop-gun').setAttribute('visible', true);
+      document.getElementById('desktop-hud').style.display = 'block';
+    });
+  }
+});
+
+// RIGHT hand: trigger / grip / button → fire
+AFRAME.registerComponent('vr-fire', {
+  init() {
+    const fire = () => fireBall(true);
+    this.el.addEventListener('triggerdown', fire);
+    this.el.addEventListener('gripdown',    fire);
+    this.el.addEventListener('abuttondown', fire);
+    this.el.addEventListener('xbuttondown', fire);
+  }
+});
+
+// LEFT hand: thumbstick / trackpad → locomotion
+AFRAME.registerComponent('vr-move', {
+  schema: { speed: { default: 4.5 } },
+  init() {
+    this.axis = [0, 0];
+    const setAxis = (e) => { this.axis = [e.detail.x, e.detail.y]; };
+    const clear   = ()  => { this.axis = [0, 0]; };
+    this.el.addEventListener('thumbstickmoved', setAxis);
+    this.el.addEventListener('trackpadmoved',   setAxis);
+    this.el.addEventListener('thumbstickup',    clear);
+    this.el.addEventListener('trackpadup',      clear);
+  },
+  tick(t, dt) {
+    const [ax, az] = this.axis;
+    if (Math.abs(ax) < 0.12 && Math.abs(az) < 0.12) return;
+
+    const rig = document.getElementById('rig');
+    const cam = document.getElementById('camera');
+    const yaw = cam.object3D.rotation.y;
+    const spd = this.data.speed * (dt / 1000);
+
+    // Forward/strafe relative to camera yaw
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);
+    const rx =  Math.cos(yaw), rz = -Math.sin(yaw);
+
+    const mx = ax * rx * spd + (-az) * fx * spd;
+    const mz = ax * rz * spd + (-az) * fz * spd;
+
+    const pos = rig.getAttribute('position');
+    rig.setAttribute('position', {
+      x: Math.max(-7, Math.min(7, pos.x + mx)),
+      y: pos.y,
+      z: Math.max(-7, Math.min(7, pos.z + mz))
+    });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// GAME STATE
+// ─────────────────────────────────────────────────────────────
+let myId = null, myColor = '#00f5ff';
+let players = {}, balls = {};
+let itPlayerId = null, gameActive = false, timeLeft = 0, scores = {};
+
+const BALL_SPEED = 14, BALL_LIFE = 3500, COOLDOWN = 550;
+const MAX_AMMO = 5, AMMO_REGEN = 2000;
+let ammo = MAX_AMMO, lastFire = 0, ballIdx = 0;
+
+const COLORS = ['#00f5ff','#ff00aa','#aaff00','#ff8800','#aa00ff','#00ffaa'];
+function colorFor(id) {
+  const keys = Object.keys(players);
+  return COLORS[keys.indexOf(id) % COLORS.length] || '#00f5ff';
+}
+
+// ─────────────────────────────────────────────────────────────
+// SOCKET
+// ─────────────────────────────────────────────────────────────
+const socket = io();
+
+socket.on('init', d => {
+  myId = d.myId; myColor = d.color;
+  players = d.players; itPlayerId = d.itPlayerId;
+  gameActive = d.gameActive; timeLeft = d.timeLeft;
+  for (const [id, p] of Object.entries(players))
+    if (id !== myId) spawnPlayer(id, p, d.color);
+  refresh();
+});
+
+socket.on('player-joined', d => {
+  players[d.id] = d.player;
+  spawnPlayer(d.id, d.player, d.color);
+  refreshScores();
+});
+
+socket.on('player-left', d => {
+  removePlayer(d.id);
+  delete players[d.id];
+  refreshScores();
+});
+
+socket.on('player-moved', d => movePlayer(d.id, d.position, d.rotation));
+
+socket.on('game-start', d => {
+  itPlayerId = d.itPlayerId; timeLeft = d.timeLeft; gameActive = true;
+  hideOverlay(); refresh();
+});
+
+socket.on('timer', d => { timeLeft = d.timeLeft; updateTimer(); });
+
+socket.on('tagged', d => {
+  itPlayerId = d.newItId; scores = d.scores;
+  refresh(); updateItRings();
+  screenFlash(itPlayerId === myId ? '#ff0022' : '#00f5ff');
+});
+
+socket.on('new-it',     d => { itPlayerId = d.itPlayerId; refresh(); updateItRings(); });
+socket.on('ball-fired', d => { if (d.shooterId !== myId) spawnBall(d.ballId, d.position, d.velocity, d.shooterId, d.color); });
+
+socket.on('waiting', () => {
+  gameActive = false;
+  showOverlay('VR TAG', 'Il faut 2 joueurs pour jouer', 'EN ATTENTE D\'UN JOUEUR');
+  document.getElementById('timer-display').textContent = '--';
+});
+
+socket.on('game-over', d => {
+  scores = d.scores; gameActive = false;
+  let winner = null, best = -1;
+  for (const [id, sc] of Object.entries(scores))
+    if (sc > best) { best = sc; winner = id; }
+  const name = winner === myId ? 'TOI !' : (players[winner]?.name || '?');
+  showOverlay('FIN !', `🏆 ${name} — ${best} tag(s)\nNouvelle partie dans 5s...`, 'RESET EN COURS...');
+  refreshScores();
+});
+
+// Send position at 20Hz
+setInterval(() => {
+  if (!myId) return;
+  const pos = document.getElementById('rig').getAttribute('position');
+  const rot = document.getElementById('camera').getAttribute('rotation');
+  socket.emit('move', { position: pos, rotation: rot });
+}, 50);
+
+// ─────────────────────────────────────────────────────────────
+// FIRE
+// ─────────────────────────────────────────────────────────────
+function fireBall(fromVR = false) {
+  const now = Date.now();
+  if (now - lastFire < COOLDOWN || ammo <= 0 || !gameActive) return;
+  lastFire = now; ammo--; renderAmmo();
+
+  const inVR = document.querySelector('a-scene').is('vr-mode');
+  let origin, velocity;
+
+  if (inVR && fromVR) {
+    const hand = document.getElementById('right-hand');
+    const wp   = new THREE.Vector3();
+    const wq   = new THREE.Quaternion();
+    hand.object3D.getWorldPosition(wp);
+    hand.object3D.getWorldQuaternion(wq);
+    const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(wq);
+    origin   = { x: wp.x + dir.x * 0.3, y: wp.y + dir.y * 0.3, z: wp.z + dir.z * 0.3 };
+    velocity = { x: dir.x * BALL_SPEED,  y: dir.y * BALL_SPEED,  z: dir.z * BALL_SPEED };
+  } else {
+    const cam = document.getElementById('camera');
+    const cp  = cam.object3D.getWorldPosition(new THREE.Vector3());
+    const cd  = new THREE.Vector3(0, 0, -1);
+    cam.object3D.getWorldDirection(cd);
+    origin   = { x: cp.x + cd.x * .5, y: cp.y + cd.y * .5 - .05, z: cp.z + cd.z * .5 };
+    velocity = { x: cd.x * BALL_SPEED, y: cd.y * BALL_SPEED, z: cd.z * BALL_SPEED };
+  }
+
+  const id = `${myId}-${ballIdx++}`;
+  spawnBall(id, origin, velocity, myId, myColor);
+  socket.emit('fire-ball', { ballId: id, position: origin, velocity });
+
+  if (!inVR) { const f = document.getElementById('fire-flash'); f.classList.add('flash'); setTimeout(()=>f.classList.remove('flash'),80); }
+
+  setTimeout(() => { ammo = Math.min(ammo+1, MAX_AMMO); renderAmmo(); }, AMMO_REGEN);
+}
+
+// ─────────────────────────────────────────────────────────────
+// BALL PHYSICS
+// ─────────────────────────────────────────────────────────────
+function spawnBall(ballId, pos, vel, shooterId, color) {
+  const c   = document.getElementById('balls-container');
+  const el  = document.createElement('a-sphere');
+  el.id = `ball-${ballId}`;
+  el.setAttribute('radius', '0.1');
+  el.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
+  el.setAttribute('material', `color:${color};emissive:${color};emissiveIntensity:.9`);
+  // outer glow
+  const g = document.createElement('a-sphere');
+  g.setAttribute('radius','0.16');
+  g.setAttribute('material',`color:${color};emissive:${color};emissiveIntensity:.3;opacity:.25;transparent:true`);
+  el.appendChild(g);
+  c.appendChild(el);
+
+  balls[ballId] = { el, shooterId, position:{...pos}, velocity:{...vel}, born:Date.now() };
+  let last = Date.now();
+
+  (function tick() {
+    const b = balls[ballId];
+    if (!b) return;
+    const now = Date.now();
+    const dt  = Math.min((now - last) / 1000, 0.05);
+    last = now;
+
+    b.position.x += b.velocity.x * dt;
+    b.position.y += b.velocity.y * dt;
+    b.position.z += b.velocity.z * dt;
+    b.velocity.y -= 9.8 * dt;
+
+    if (b.position.y < 0.1) {
+      b.velocity.y *= -.35; b.velocity.x *= .6; b.velocity.z *= .6;
+      b.position.y  = 0.1;
+    }
+
+    b.el.setAttribute('position', `${b.position.x} ${b.position.y} ${b.position.z}`);
+    checkHit(ballId, b);
+    if (balls[ballId]) requestAnimationFrame(tick);
+  })();
+
+  setTimeout(() => removeBall(ballId), BALL_LIFE);
+}
+
+function checkHit(ballId, b) {
+  if (!gameActive) return;
+  const bp = b.position;
+
+  // vs remote players
+  for (const id of Object.keys(players)) {
+    if (id === b.shooterId) continue;
+    const el = document.getElementById(`player-${id}`);
+    if (!el) continue;
+    const pp = el.getAttribute('position');
+    const dx = bp.x-pp.x, dy = bp.y-(pp.y+1.0), dz = bp.z-pp.z;
+    if (Math.sqrt(dx*dx+dy*dy+dz*dz) < 0.55) {
+      socket.emit('ball-hit', { targetId:id, shooterId:b.shooterId, ballId });
+      hitFx(bp); removeBall(ballId); return;
+    }
+  }
+
+  // vs self (if remote shot)
+  if (b.shooterId !== myId) {
+    const cp = document.getElementById('camera').object3D.getWorldPosition(new THREE.Vector3());
+    const dx = bp.x-cp.x, dy = bp.y-cp.y, dz = bp.z-cp.z;
+    if (Math.sqrt(dx*dx+dy*dy+dz*dz) < 0.55) {
+      socket.emit('ball-hit', { targetId:myId, shooterId:b.shooterId, ballId });
+      hitFx(bp); removeBall(ballId);
+    }
+  }
+}
+
+function removeBall(id) {
+  const b = balls[id];
+  if (b?.el?.parentNode) b.el.parentNode.removeChild(b.el);
+  delete balls[id];
+}
+
+function hitFx(pos) {
+  const c = document.getElementById('balls-container');
+  for (let i = 0; i < 8; i++) {
+    const s = document.createElement('a-sphere');
+    s.setAttribute('radius','0.055');
+    s.setAttribute('position',`${pos.x} ${pos.y} ${pos.z}`);
+    s.setAttribute('material','color:#ff2244;emissive:#ff2244;emissiveIntensity:1');
+    c.appendChild(s);
+    let p = {...pos};
+    let v = { x:(Math.random()-.5)*6, y:Math.random()*5+2, z:(Math.random()-.5)*6 };
+    const born = Date.now();
+    (function a() {
+      const dt=.016; p.x+=v.x*dt; p.y+=v.y*dt; p.z+=v.z*dt; v.y-=9*dt;
+      s.setAttribute('position',`${p.x} ${p.y} ${p.z}`);
+      if (Date.now()-born<500) requestAnimationFrame(a);
+      else if (s.parentNode) s.parentNode.removeChild(s);
+    })();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// AVATARS
+// ─────────────────────────────────────────────────────────────
+function spawnPlayer(id, player, color) {
+  if (document.getElementById(`player-${id}`)) return;
+  const c = color || colorFor(id);
+  const el = document.createElement('a-entity');
+  el.id = `player-${id}`;
+  el.setAttribute('position', `${player.position.x} 0 ${player.position.z}`);
+  el.innerHTML = `
+    <a-capsule radius=".24" height="1.1" position="0 .82 0"
+      material="color:${c};roughness:.3;metalness:.5;emissive:${c};emissiveIntensity:.15"></a-capsule>
+    <a-sphere id="head-${id}" radius=".21" position="0 1.65 0"
+      material="color:${c};roughness:.2;metalness:.5;emissive:${c};emissiveIntensity:.2"></a-sphere>
+    <a-sphere radius=".04" position="-.08 1.69 .17" material="color:#fff;emissive:#fff;emissiveIntensity:.6"></a-sphere>
+    <a-sphere radius=".04" position=" .08 1.69 .17" material="color:#fff;emissive:#fff;emissiveIntensity:.6"></a-sphere>
+    <a-entity position=".28 1.15 -.35">
+      <a-box width=".05" height=".06" depth=".2" material="color:#0d1530;roughness:.1;metalness:.9"></a-box>
+      <a-sphere radius=".022" position="0 .008 -.12" material="color:${c};emissive:${c};emissiveIntensity:1"></a-sphere>
+    </a-entity>
+    <a-text value="${player.name||id.slice(0,4)}" align="center" color="${c}" width="2.5" position="0 2.15 0"></a-text>
+    <a-torus id="it-ring-${id}" radius=".38" radius-tubular=".035"
+      position="0 .06 0" rotation="90 0 0"
+      material="color:#ff2244;emissive:#ff2244;emissiveIntensity:1;opacity:0;transparent:true"
+      animation="property:rotation;from:90 0 0;to:90 360 0;dur:1200;loop:true;easing:linear">
+    </a-torus>
+  `;
+  document.getElementById('players-container').appendChild(el);
+}
+
+function removePlayer(id) {
+  const el = document.getElementById(`player-${id}`);
+  if (el) el.parentNode.removeChild(el);
+}
+
+function movePlayer(id, pos, rot) {
+  const el = document.getElementById(`player-${id}`);
+  if (!el) return;
+  el.setAttribute('position', `${pos.x} 0 ${pos.z}`);
+  el.setAttribute('rotation', `0 ${rot.y} 0`);
+  const head = document.getElementById(`head-${id}`);
+  if (head) head.setAttribute('rotation', `${rot.x * 0.3} 0 0`);
+}
+
+function updateItRings() {
+  for (const id of Object.keys(players)) {
+    const r = document.getElementById(`it-ring-${id}`);
+    if (r) r.setAttribute('material', 'opacity', id === itPlayerId ? 1 : 0);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// DESKTOP INPUT
+// ─────────────────────────────────────────────────────────────
+document.addEventListener('click', e => { if (e.target.closest('a-scene')) fireBall(false); });
+document.addEventListener('keydown', e => { if (e.code==='Space'||e.code==='KeyF') fireBall(false); });
+
+// ─────────────────────────────────────────────────────────────
+// UI
+// ─────────────────────────────────────────────────────────────
+function refresh() { updateTimer(); updateStatus(); refreshScores(); }
+
+function updateTimer() {
+  const v = Math.max(0, timeLeft);
+  document.getElementById('timer-display').textContent = v;
+  document.getElementById('timer-display').classList.toggle('urgent', timeLeft<=10&&timeLeft>0);
+  const vt = document.getElementById('vr-timer-text');
+  if (vt) vt.setAttribute('value', `${v}s`);
+}
+
+function updateStatus() {
+  const el = document.getElementById('status-text');
+  const vt = document.getElementById('vr-status-text');
+  if (!gameActive) { el.textContent='En attente...'; el.className=''; return; }
+  if (itPlayerId === myId) {
+    el.textContent='🔴 TU ES LE CHAT'; el.className='is-it';
+    if (vt) vt.setAttribute('value','🔴 TU ES LE CHAT');
+  } else {
+    const name = players[itPlayerId]?.name||'?';
+    el.textContent=`✅ ${name} EST LE CHAT`; el.className='not-it';
+    if (vt) vt.setAttribute('value',`${name} EST LE CHAT`);
+  }
+  updateItRings();
+}
+
+function refreshScores() {
+  const el = document.getElementById('scores');
+  el.innerHTML = '';
+  for (const [id, p] of Object.entries(players)) {
+    const d = document.createElement('div');
+    d.className = `score-entry${id===myId?' me':''}`;
+    d.textContent = `${p.name||id.slice(0,4)} — ${scores[id]||0}pt${id===itPlayerId?' 🔴':''}`;
+    el.appendChild(d);
+  }
+}
+
+function renderAmmo() {
+  const el = document.getElementById('ammo-bar');
+  el.innerHTML = '';
+  for (let i=0;i<MAX_AMMO;i++) {
+    const d = document.createElement('div');
+    d.className = `ammo-dot${i>=ammo?' empty':''}`;
+    el.appendChild(d);
+  }
+}
+
+function screenFlash(color) {
+  const f = document.getElementById('fire-flash');
+  f.style.background = color; f.style.opacity='.28';
+  setTimeout(()=>f.style.opacity='0', 350);
+}
+
+function showOverlay(title, msg, badge) {
+  document.getElementById('overlay-title').textContent = title;
+  document.getElementById('overlay-sub').textContent   = msg;
+  document.getElementById('overlay-badge').textContent = badge;
+  document.getElementById('overlay').classList.remove('hidden');
+}
+
+function hideOverlay() {
+  document.getElementById('overlay').classList.add('hidden');
+}
+</script>
+</body>
+</html>

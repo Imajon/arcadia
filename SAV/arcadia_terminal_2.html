@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ARCADIA — 9 MAI</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; background:#000; overflow:hidden;
+  font-family:'Courier New','Lucida Console',monospace; cursor:none; }
+
+canvas#bg { position:fixed; top:0; left:0; width:100%; height:100%; z-index:0; }
+
+#scanline {
+  position:fixed; top:0; left:0; width:100%; height:100%; z-index:2; pointer-events:none;
+  background:repeating-linear-gradient(to bottom,transparent 0,transparent 2px,rgba(0,0,0,0.06) 2px,rgba(0,0,0,0.06) 4px);
+}
+#vignette {
+  position:fixed; top:0; left:0; width:100%; height:100%; z-index:3; pointer-events:none;
+  background:radial-gradient(ellipse at center,transparent 45%,rgba(0,0,0,0.9) 100%);
+}
+
+/* ── TERMINAUX ─────────────────────────────────────── */
+.terminal {
+  position:fixed; z-index:8; pointer-events:none;
+  width:340px; /* largeur fixe */
+  font-family:'Courier New',monospace; font-size:11px; line-height:1.55;
+  border:1px solid rgba(255,255,255,0.08);
+  background:rgba(0,0,0,0.72);
+  backdrop-filter:blur(2px);
+  padding:0;
+  overflow:hidden;
+  transition:border-color 0.4s;
+}
+.terminal.active { border-color:rgba(255,255,255,0.22); }
+
+/* Barre de titre */
+.term-header {
+  display:flex; align-items:center; gap:6px;
+  padding:5px 10px;
+  border-bottom:1px solid rgba(255,255,255,0.06);
+  background:rgba(255,255,255,0.03);
+  font-size:9px; letter-spacing:0.15em; color:rgba(255,255,255,0.35);
+  text-transform:uppercase;
+}
+.term-dot { width:6px; height:6px; border-radius:50%; opacity:0.6; }
+
+/* Corps scrollable (mais on ne scroll pas, on tronque par le haut) */
+.term-body {
+  padding:8px 12px;
+  min-height:160px; max-height:220px;
+  overflow:hidden;
+  display:flex; flex-direction:column; justify-content:flex-end;
+}
+.term-line {
+  white-space:pre; margin:0;
+  opacity:0;
+  animation:termFadeIn 0.15s forwards;
+  color:rgba(200,200,200,0.75);
+  font-size:11px;
+}
+@keyframes termFadeIn { from{opacity:0;transform:translateX(-4px)} to{opacity:1;transform:none} }
+
+/* Curseur clignotant */
+.term-cursor {
+  display:inline-block; width:7px; height:12px;
+  background:rgba(255,255,255,0.7); vertical-align:bottom; margin-left:2px;
+  animation:blink 1s step-end infinite;
+}
+@keyframes blink { 50%{opacity:0} }
+
+/* Positionnement — quadrant haut-gauche et bas-droite */
+#term-a {
+  top: calc(50% - 280px);   /* centre vertical haut */
+  left: calc(25% - 170px);  /* centre quadrant gauche */
+}
+#term-b {
+  top: calc(50% + 20px);    /* centre vertical bas */
+  left: calc(75% - 170px);  /* centre quadrant droit */
+}
+
+/* ── HUD ─────────────────────────────────────────── */
+#statusbar { position:fixed; bottom:18px; left:28px; z-index:10; font-size:10px; letter-spacing:0.12em; opacity:0.35; color:#fff; text-transform:uppercase; }
+#clock     { position:fixed; top:20px; right:28px; z-index:10; font-size:11px; letter-spacing:0.2em; opacity:0.35; color:#fff; }
+#corner-tl { position:fixed; top:18px; left:24px; z-index:10; font-size:10px; letter-spacing:0.15em; opacity:0.25; color:#fff; text-transform:uppercase; }
+#webcam    { position:fixed; top:-9999px; left:-9999px; width:320px; height:240px; }
+#camstatus { position:fixed; bottom:18px; right:28px; z-index:10; font-size:9px; letter-spacing:0.1em; opacity:0.4; color:#fff; text-transform:uppercase; }
+#camstatus.active { color:#00ff9d; opacity:0.65; }
+#camstatus.error  { color:#ff4444; opacity:0.65; }
+</style>
+</head>
+<body>
+
+<canvas id="bg"></canvas>
+<video id="webcam" autoplay muted playsinline></video>
+
+<!-- Terminal A — quadrant haut-gauche -->
+<div class="terminal" id="term-a">
+  <div class="term-header">
+    <span class="term-dot" id="dot-a" style="background:#00e5ff"></span>
+    <span id="term-a-title">SYS::NODE_A — IDLE</span>
+  </div>
+  <div class="term-body" id="term-a-body">
+    <span class="term-line" style="opacity:1;color:rgba(200,200,200,0.4)">initialisation du flux…</span>
+  </div>
+</div>
+
+<!-- Terminal B — quadrant bas-droite -->
+<div class="terminal" id="term-b">
+  <div class="term-header">
+    <span class="term-dot" id="dot-b" style="background:#ff6600"></span>
+    <span id="term-b-title">SYS::NODE_B — IDLE</span>
+  </div>
+  <div class="term-body" id="term-b-body">
+    <span class="term-line" style="opacity:1;color:rgba(200,200,200,0.4)">en attente de signal…</span>
+  </div>
+</div>
+
+<div id="scanline"></div>
+<div id="vignette"></div>
+<div id="statusbar">SYS::ARCADIA_V4 — <span id="fps">--</span> FPS</div>
+<div id="clock"></div>
+<div id="corner-tl">STUDIO EYA / 9 MAI</div>
+<div id="camstatus">CAM::INIT…</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// CANVAS
+// ═══════════════════════════════════════════════════════════
+const canvas = document.getElementById('bg');
+const ctx    = canvas.getContext('2d');
+let W, H;
+
+// ═══════════════════════════════════════════════════════════
+// MOTS-CLÉS
+// ═══════════════════════════════════════════════════════════
+const KEYWORDS_TEXT = ['9 MAI','ARCADIA','ART NUMERIQUE','REALITE VIRTUELLE','ARCADE','IMMERSIVE'];
+const KEYWORDS_SET  = new Set(KEYWORDS_TEXT);
+
+const KEYWORDS = [
+  { text:'9 MAI',             weight:4 },
+  { text:'ARCADIA',           weight:5 },
+  { text:'ART NUMERIQUE',     weight:3 },
+  { text:'REALITE VIRTUELLE', weight:3 },
+  { text:'ARCADE',            weight:4 },
+  { text:'IMMERSIVE',         weight:4 },
+];
+
+// ═══════════════════════════════════════════════════════════
+// PALETTES
+// ═══════════════════════════════════════════════════════════
+const PALETTES = [
+  { base:'#00ff9d', accent:'#00d4ff', key:'#ff00c8' },
+  { base:'#ff6f00', accent:'#ffcc00', key:'#ff0055' },
+  { base:'#cc44ff', accent:'#8844ff', key:'#00ffcc' },
+  { base:'#44d9ff', accent:'#e0e0e0', key:'#ff6688' },
+  { base:'#aaff00', accent:'#00ff99', key:'#ff4444' },
+];
+let curPI=0, nxtPI=1, palBlend=0, palCycle=0;
+const PAL_DUR=2200;
+
+function lerpHex(a,b,t){
+  const ah=parseInt(a.slice(1,7),16),bh=parseInt(b.slice(1,7),16);
+  const ar=(ah>>16)&255,ag=(ah>>8)&255,ab=ah&255;
+  const br=(bh>>16)&255,bg=(bh>>8)&255,bb=bh&255;
+  return '#'+[ar+(br-ar)*t,ag+(bg-ag)*t,ab+(bb-ab)*t].map(v=>Math.round(v).toString(16).padStart(2,'0')).join('');
+}
+function getPal(){
+  const a=PALETTES[curPI],b=PALETTES[nxtPI],t=palBlend;
+  return { base:lerpHex(a.base,b.base,t), accent:lerpHex(a.accent,b.accent,t), key:lerpHex(a.key,b.key,t) };
+}
+
+// ═══════════════════════════════════════════════════════════
+// COULEURS DE STREAM — chaque colonne a une teinte propre
+// On génère un dégradé de teintes sur le cercle HSL
+// ═══════════════════════════════════════════════════════════
+let streamHues = []; // tableau indexé par colonne
+
+function initStreamColors(numCols){
+  streamHues=[];
+  for(let c=0;c<numCols;c++){
+    // Distribution non uniforme — clusters autour de certaines teintes
+    const hue = (c * 137.508) % 360; // angle d'or pour distribution
+    streamHues.push(hue);
+  }
+}
+
+function streamColor(col, frac, pal){
+  // frac = 0 (tête) à 1 (queue)
+  const hue = streamHues[col] || 0;
+  const sat = 70 + frac*20;
+  const lum = 30 + (1-frac)*40;
+  return `hsl(${hue},${sat}%,${lum}%)`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// MAINS — détection MediaPipe
+// ═══════════════════════════════════════════════════════════
+const HAND_COLORS=['#00e5ff','#ff6600'];
+let hands=[];
+let handPoints=[];
+const HAND_R=110, REP_FORCE=4.2, DEF_DECAY=0.86;
+const KEY_LM=[0,1,4,5,8,9,12,13,16,17,20];
+
+const camEl=document.getElementById('webcam');
+const camSt=document.getElementById('camstatus');
+
+function initHands(){
+  if(!navigator.mediaDevices||!window.Hands){
+    camSt.textContent='CAM::INDISPONIBLE'; camSt.classList.add('error'); return;
+  }
+  const mp=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+  mp.setOptions({maxNumHands:2,modelComplexity:0,minDetectionConfidence:0.6,minTrackingConfidence:0.5});
+  mp.onResults(res=>{
+    hands=[]; handPoints=[];
+    if(!res.multiHandLandmarks) return;
+    res.multiHandLandmarks.forEach((lms,hi)=>{
+      const col=HAND_COLORS[hi%2];
+      const palm=lms[9];
+      const palmX=(1-palm.x)*W, palmY=palm.y*H;
+      const pts=[];
+      KEY_LM.forEach(idx=>{
+        const lm=lms[idx];
+        const px=(1-lm.x)*W, py=lm.y*H;
+        pts.push({x:px,y:py});
+        handPoints.push({x:px,y:py,r:HAND_R,color:col,handIdx:hi});
+      });
+      hands.push({points:pts,color:col,palmX,palmY,idx:hi});
+    });
+    // Déclencher alimentation terminaux selon activité des mains
+    onHandActivity();
+  });
+  const cam=new Camera(camEl,{
+    onFrame:async()=>{await mp.send({image:camEl});},
+    width:320,height:240
+  });
+  cam.start()
+    .then(()=>{camSt.textContent='CAM::MAINS ACTIVES';camSt.classList.add('active');})
+    .catch(()=>{camSt.textContent='CAM::ACCÈS REFUSÉ';camSt.classList.add('error');});
+}
+
+function repulsion(px,py){
+  let dx=0,dy=0,nearColor=null,maxF=0;
+  for(const hp of handPoints){
+    const ex=px-hp.x,ey=py-hp.y;
+    const d=Math.sqrt(ex*ex+ey*ey);
+    if(d<hp.r&&d>1){
+      const f=REP_FORCE*Math.pow(1-d/hp.r,2.0);
+      dx+=(ex/d)*f; dy+=(ey/d)*f;
+      if(f>maxF){maxF=f;nearColor=hp.color;}
+    }
+  }
+  return {dx,dy,nearColor,mag:Math.sqrt(dx*dx+dy*dy)};
+}
+
+// ═══════════════════════════════════════════════════════════
+// TERMINAUX HTML — logique d'alimentation
+// ═══════════════════════════════════════════════════════════
+const termDefs=[
+  { id:'term-a', bodyId:'term-a-body', titleId:'term-a-title', dotId:'dot-a',
+    color:'#00e5ff', handIdx:0, label:'NODE_A', lines:[] },
+  { id:'term-b', bodyId:'term-b-body', titleId:'term-b-title', dotId:'dot-b',
+    color:'#ff6600', handIdx:1, label:'NODE_B', lines:[] },
+];
+const MAX_LINES=12;
+
+// Contenu génératif pour les terminaux
+const TERM_PREFIXES=['> INIT','>> EXEC','[SYS]','[NET]','>>> LOAD','[PROC]','FLUX::','LINK::','DATA::','SCAN::','MAP::'];
+const TERM_VERBS=['render','compile','stream','decode','sync','project','inject','trace','analyze','generate'];
+const TERM_NOUNS=['module','layer','node','sequence','vector','signal','frame','entity','fragment','instance'];
+const TERM_ACTIONS=[
+  'HANDSHAKE établi',
+  'flux entrant détecté',
+  'calibration du signal',
+  'injection de données',
+  'synchronisation…',
+  'connexion stabilisée',
+  'lecture biométrique',
+  'mappage gestuel actif',
+  'triangulation OK',
+  'empreinte capturée',
+  'décodage en cours',
+  'protocole lancé',
+];
+
+function kwWord(){
+  return KEYWORDS_TEXT[Math.floor(Math.random()*KEYWORDS_TEXT.length)];
+}
+function rndPrefix(){ return TERM_PREFIXES[Math.floor(Math.random()*TERM_PREFIXES.length)]; }
+function rndVerb(){   return TERM_VERBS[Math.floor(Math.random()*TERM_VERBS.length)].toUpperCase(); }
+function rndNoun(){   return TERM_NOUNS[Math.floor(Math.random()*TERM_NOUNS.length)].toUpperCase(); }
+function rndHex(){    return Math.floor(Math.random()*0xFFFFFF).toString(16).toUpperCase().padStart(6,'0'); }
+function rndNum(){    return Math.floor(Math.random()*9999).toString().padStart(4,'0'); }
+function rndAction(){ return TERM_ACTIONS[Math.floor(Math.random()*TERM_ACTIONS.length)]; }
+
+// Types de lignes générées :
+// 'sys'    : ligne technique générique
+// 'kw'     : ligne avec mot-clé important
+// 'action' : ligne d'action déclenchée par la main
+// 'data'   : ligne de donnée pure
+// 'sep'    : séparateur
+function genLine(type){
+  switch(type){
+    case 'sys':
+      return { text:`${rndPrefix()} ${rndVerb()}_${rndNoun()} [0x${rndHex()}]`, type:'sys' };
+    case 'kw':
+      return { text:`>>> TARGET: ${kwWord()} — ref.${rndNum()}`, type:'kw' };
+    case 'action':
+      return { text:`[ACTION] ${rndAction().toUpperCase()}`, type:'action' };
+    case 'data':
+      return { text:`  ${rndNum()} bytes  lat:${(Math.random()*9).toFixed(1)}ms  ok`, type:'data' };
+    case 'sep':
+      return { text:'─'.repeat(34), type:'sep' };
+    case 'status':
+      return { text:`STATUS: ${['RUNNING','ACTIVE','STREAMING','LOCKED'][Math.floor(Math.random()*4)]} ██████ ${Math.floor(Math.random()*100)}%`, type:'status' };
+    default:
+      return { text:`${rndPrefix()} ${rndVerb()}`, type:'sys' };
+  }
+}
+
+// Ajoute une ligne HTML dans un terminal
+function pushLine(termDef, lineObj){
+  const body=document.getElementById(termDef.bodyId);
+  if(!body) return;
+
+  // Couleur de la ligne selon son type
+  let color='rgba(180,180,180,0.7)';
+  let bold=false;
+  switch(lineObj.type){
+    case 'kw':
+      color=termDef.color; bold=true; break;
+    case 'action':
+      color='#ffffff'; bold=true; break;
+    case 'data':
+      color='rgba(140,140,140,0.55)'; break;
+    case 'sep':
+      color='rgba(255,255,255,0.1)'; break;
+    case 'status':
+      color=termDef.color; break;
+    default:
+      color='rgba(180,180,180,0.65)'; break;
+  }
+
+  const span=document.createElement('span');
+  span.className='term-line';
+  span.style.color=color;
+  if(bold) span.style.fontWeight='bold';
+  span.textContent=lineObj.text;
+  body.appendChild(span);
+  termDef.lines.push(span);
+
+  // Tronquer si trop de lignes
+  while(termDef.lines.length>MAX_LINES){
+    const old=termDef.lines.shift();
+    if(old.parentNode) old.parentNode.removeChild(old);
+  }
+}
+
+// Mettre à jour le titre du terminal
+function setTermTitle(termDef, status){
+  const el=document.getElementById(termDef.titleId);
+  if(el) el.textContent=`SYS::${termDef.label} — ${status}`;
+  const t=document.getElementById(termDef.id);
+  if(t) t.classList.toggle('active', status!=='IDLE');
+}
+
+// État des terminaux
+const termState=[
+  { active:false, timer:0, burstTimer:0, seqStep:0 },
+  { active:false, timer:0, burstTimer:0, seqStep:0 },
+];
+
+// Séquences d'actions déclenchées par les mains
+const ACTION_SEQUENCES=[
+  ['sys','sys','kw','action','data','status'],
+  ['sys','kw','sys','action','data','kw','sep','status'],
+  ['action','sys','data','kw','status'],
+  ['sys','sep','kw','action','sys','data','status'],
+];
+
+let handActivityCooldown=[0,0];
+let lastHandCount=0;
+
+function onHandActivity(){
+  const n=hands.length;
+
+  hands.forEach((hand,i)=>{
+    const td=termDefs[i];
+    const ts=termState[i];
+    if(handActivityCooldown[i]>0) return;
+
+    // Déclenche une séquence dans le terminal associé à la main
+    ts.active=true;
+    ts.seq=ACTION_SEQUENCES[Math.floor(Math.random()*ACTION_SEQUENCES.length)];
+    ts.seqStep=0;
+    handActivityCooldown[i]=18; // ~300ms entre bursts
+    setTermTitle(td,'ACTIF');
+  });
+
+  // Si les deux mains sont présentes → événement spécial dans les deux terminaux
+  if(n===2 && lastHandCount<2){
+    [0,1].forEach(i=>{
+      termState[i].seq=['sep','kw','action','kw','status'];
+      termState[i].seqStep=0;
+    });
+    pushLine(termDefs[0],{text:'[BRIDGE] CONNEXION INTER-NODALE',type:'action'});
+    pushLine(termDefs[1],{text:'[BRIDGE] SYNC BIDIRECTIONNELLE',type:'action'});
+  }
+  lastHandCount=n;
+}
+
+// Mise à jour terminaux (appelée chaque frame)
+let termFrameCount=0;
+function updTerminals(){
+  termFrameCount++;
+  handActivityCooldown=handActivityCooldown.map(v=>Math.max(0,v-1));
+
+  termDefs.forEach((td,i)=>{
+    const ts=termState[i];
+
+    // Progresser dans la séquence d'action
+    if(ts.seq && ts.seqStep<ts.seq.length){
+      if(termFrameCount%8===0){ // une ligne toutes les ~130ms
+        pushLine(td, genLine(ts.seq[ts.seqStep]));
+        ts.seqStep++;
+        if(ts.seqStep>=ts.seq.length){
+          ts.seq=null;
+          setTermTitle(td,'STREAM');
+        }
+      }
+    } else {
+      // Activité de fond aléatoire lente
+      if(ts.active && termFrameCount%(40+Math.floor(Math.random()*30))===i*17%37){
+        const types=['sys','data','sys'];
+        pushLine(td,genLine(types[Math.floor(Math.random()*types.length)]));
+      }
+      // Idle progressif
+      if(!hands.some(h=>h.idx===i) && ts.active){
+        ts.timer++;
+        if(ts.timer>120){ ts.active=false; ts.timer=0; setTermTitle(td,'IDLE'); }
+      } else { ts.timer=0; }
+    }
+  });
+}
+
+// Auto-feed au démarrage (sans main)
+function autoSeedTerminals(){
+  termDefs.forEach((td,i)=>{
+    setTimeout(()=>{
+      pushLine(td,genLine('sys'));
+      pushLine(td,genLine('data'));
+    },i*400+200);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// STREAMS
+// ═══════════════════════════════════════════════════════════
+const FS=14;
+let cols,rows,streams=[];
+
+const CL='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;:,.<>?/~`\\';
+const CJ='アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン';
+const CS='░▒▓│┤╣║╗╝┐└┴┬├─┼╚╔╩╦╠═╬┘┌';
+function rc(){
+  const r=Math.random();
+  if(r<0.5) return CL[Math.floor(Math.random()*CL.length)];
+  if(r<0.8) return CJ[Math.floor(Math.random()*CJ.length)];
+  return CS[Math.floor(Math.random()*CS.length)];
+}
+
+function mkStream(col,rand){
+  const len=6+Math.floor(Math.random()*22);
+  const spd=0.4+Math.random()*1.2;
+  const y=rand?Math.random()*-rows:-len;
+  let kw=null;
+  if(Math.random()<0.09){
+    const pool=[];
+    KEYWORDS.forEach(k=>{for(let i=0;i<k.weight;i++) pool.push(k.text);});
+    kw=pool[Math.floor(Math.random()*pool.length)];
+  }
+  return { col,y,len,spd,chars:[],kw,kwp:0,glitch:0,dvx:0,dvy:0,dx:0,dy:0 };
+}
+
+function initStreams(){
+  cols=Math.floor(W/FS); rows=Math.floor(H/FS);
+  initStreamColors(cols);
+  streams=[];
+  for(let c=0;c<cols;c++) streams.push(mkStream(c,true));
+}
+
+// Étincelles
+let sparks=[];
+function addSparks(x,y,color,n=2){
+  for(let i=0;i<n;i++) sparks.push({
+    x,y,vx:(Math.random()-0.5)*7,vy:-2-Math.random()*4,
+    life:1,ch:rc(),col:color
+  });
+}
+
+function updStream(s){
+  while(s.chars.length<s.len) s.chars.push(rc());
+  if(Math.random()<0.3) s.chars[Math.floor(Math.random()*s.chars.length)]=rc();
+  s.glitch=Math.random()<0.002?3:Math.max(0,s.glitch-1);
+
+  const hx=s.col*FS+s.dx, hy=Math.floor(s.y)*FS;
+  const rep=repulsion(hx,hy);
+  s.dvx=(s.dvx+rep.dx*0.55)*DEF_DECAY;
+  s.dvy=(s.dvy+rep.dy*0.40)*DEF_DECAY;
+  s.dx=s.dx*0.93+s.dvx;
+  s.dy+=s.dvy;
+  if(rep.mag>0.9&&Math.random()<0.35) addSparks(hx,hy,rep.nearColor||'#ffffff');
+  s.y+=s.spd*Math.max(0.1,1-Math.abs(s.dvy)*0.35);
+  if(s.y-s.len>rows+2){
+    const ns=mkStream(s.col,false);
+    ns.dx=s.dx; ns.dvx=s.dvx;
+    Object.assign(s,ns); s.chars=[];
+  }
+}
+
+function drawStreams(pal){
+  ctx.font=`${FS}px 'Courier New',monospace`;
+  for(const s of streams){
+    const bx=s.col*FS+s.dx;
+    const hue=streamHues[s.col]||0;
+
+    for(let i=0;i<s.len;i++){
+      const row=Math.floor(s.y)-i;
+      if(row<0||row>rows) continue;
+      const py=row*FS+s.dy;
+      const frac=1-i/s.len;
+
+      // Tête = blanc pur ou couleur de la main proche
+      let nearColor=null, nearDist=Infinity;
+      for(const hp of handPoints){
+        const ex=bx-hp.x,ey=py-hp.y;
+        const d=Math.sqrt(ex*ex+ey*ey);
+        if(d<hp.r*0.55&&d<nearDist){nearDist=d;nearColor=hp.color;}
+      }
+
+      let color;
+      ctx.shadowBlur=0;
+      if(i===0){
+        // Tête lumineuse — blanc ou couleur main
+        color=nearColor||'#ffffff';
+        ctx.shadowColor=nearColor||`hsl(${hue},80%,70%)`;
+        ctx.shadowBlur=nearColor?12:6;
+      } else {
+        // Queue — couleur HSL propre à la colonne, fade
+        const sat=65+frac*20;
+        const lum=15+(1-frac)*35;
+        const alpha=Math.pow(frac,1.4);
+        // Couleur + alpha via globalAlpha serait trop coûteux — on encode dans hsl
+        const lumFinal=lum*alpha;
+        color=`hsl(${hue},${sat}%,${lumFinal}%)`;
+      }
+
+      let ch=s.chars[i]||rc();
+      if(s.kw&&i===0){
+        ch=s.kw[s.kwp%s.kw.length];
+        if(Math.random()<0.05) s.kwp++;
+        color=pal.key;
+        ctx.shadowColor=pal.key; ctx.shadowBlur=10;
+      }
+
+      ctx.fillStyle=color;
+      ctx.fillText(ch,bx+(s.glitch>0?(Math.random()-0.5)*5:0),py);
+    }
+    ctx.shadowBlur=0;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// ÉTINCELLES
+// ═══════════════════════════════════════════════════════════
+function updSparks(){
+  for(let i=sparks.length-1;i>=0;i--){
+    const sp=sparks[i];
+    sp.x+=sp.vx; sp.y+=sp.vy; sp.vy+=0.2; sp.life-=0.038;
+    if(sp.life<=0) sparks.splice(i,1);
+  }
+}
+function drawSparks(){
+  ctx.font=`11px 'Courier New',monospace`;
+  ctx.shadowBlur=0;
+  for(const sp of sparks){
+    ctx.globalAlpha=sp.life;
+    ctx.fillStyle=sp.col;
+    ctx.fillText(sp.ch,sp.x,sp.y);
+  }
+  ctx.globalAlpha=1;
+}
+
+// ═══════════════════════════════════════════════════════════
+// AURA MAINS
+// ═══════════════════════════════════════════════════════════
+let auraPhase=0;
+function drawHandAuras(){
+  auraPhase+=0.035;
+  for(const hand of hands){
+    const pulse=0.7+0.3*Math.sin(auraPhase+hand.idx*Math.PI);
+    const cx=hand.palmX, cy=hand.palmY, col=hand.color;
+    const g=ctx.createRadialGradient(cx,cy,2,cx,cy,HAND_R*pulse);
+    g.addColorStop(0,col+'28'); g.addColorStop(0.5,col+'0a'); g.addColorStop(1,col+'00');
+    ctx.fillStyle=g;
+    ctx.beginPath(); ctx.arc(cx,cy,HAND_R*pulse,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle=col+'28'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.arc(cx,cy,HAND_R,0,Math.PI*2); ctx.stroke();
+    ctx.shadowBlur=0;
+    hand.points.forEach((pt,ii)=>{
+      if(ii===2||ii===4||ii===6||ii===8||ii===10){
+        ctx.fillStyle=col+'bb';
+        ctx.beginPath(); ctx.arc(pt.x,pt.y,2.5,0,Math.PI*2); ctx.fill();
+      }
+    });
+    ctx.fillStyle=col+'dd';
+    ctx.beginPath(); ctx.arc(cx,cy,5,0,Math.PI*2); ctx.fill();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// PARTICULES INTER-MAINS
+// ═══════════════════════════════════════════════════════════
+let bridgeParticles=[];
+const BRIDGE_MAX=35;
+
+function updBridge(){
+  for(let i=bridgeParticles.length-1;i>=0;i--){
+    const p=bridgeParticles[i];
+    p.t+=p.spd;
+    if(p.t>=1){bridgeParticles.splice(i,1);continue;}
+    const dx=p.tx-p.sx, dy=p.ty-p.sy;
+    const len=Math.sqrt(dx*dx+dy*dy)||1;
+    const nx=-dy/len, ny=dx/len;
+    const wave=Math.sin(p.t*Math.PI*p.freq)*p.amp;
+    p.x=p.sx+dx*p.t+nx*wave;
+    p.y=p.sy+dy*p.t+ny*wave;
+    p.life=Math.sin(p.t*Math.PI);
+    if(Math.random()<0.08) p.ch=rc();
+  }
+  if(hands.length===2&&bridgeParticles.length<BRIDGE_MAX){
+    const h0=hands[0],h1=hands[1];
+    const p0=h0.points[Math.floor(Math.random()*h0.points.length)];
+    const p1=h1.points[Math.floor(Math.random()*h1.points.length)];
+    bridgeParticles.push({
+      sx:p0.x,sy:p0.y,tx:p1.x,ty:p1.y,x:p0.x,y:p0.y,
+      t:0,spd:0.008+Math.random()*0.012,ch:rc(),life:0,
+      col0:h0.color,col1:h1.color,
+      freq:1+Math.random()*2, amp:6+Math.random()*20
+    });
+  }
+}
+
+function drawBridge(){
+  if(!bridgeParticles.length) return;
+  ctx.font=`12px 'Courier New',monospace`;
+  ctx.shadowBlur=0;
+  for(const p of bridgeParticles){
+    const color=lerpHex(p.col0,p.col1,p.t);
+    ctx.globalAlpha=p.life*0.85;
+    ctx.fillStyle=color;
+    ctx.fillText(p.ch,p.x,p.y);
+  }
+  ctx.globalAlpha=1;
+  if(hands.length===2){
+    const h0=hands[0],h1=hands[1];
+    ctx.globalAlpha=0.1;
+    ctx.strokeStyle='#ffffff';
+    ctx.setLineDash([3,9]);
+    ctx.lineWidth=1;
+    ctx.beginPath();
+    ctx.moveTo(h0.palmX,h0.palmY);
+    ctx.lineTo(h1.palmX,h1.palmY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha=1;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+// LIGNES TERMINALES HORIZONTALES (fond)
+// ═══════════════════════════════════════════════════════════
+let hLines=[];
+const TPFX=['> INIT','>> EXEC','[SYS]','[NET]','>>> LOAD','[PROC]','FLUX::','LINK::','DATA::'];
+const TVRB=['render','compile','stream','decode','sync','project','inject','trace'];
+const TNON=['module','layer','node','sequence','vector','signal','frame','entity'];
+function genHL(){
+  const p=TPFX[Math.floor(Math.random()*TPFX.length)];
+  const v=TVRB[Math.floor(Math.random()*TVRB.length)].toUpperCase();
+  const n=TNON[Math.floor(Math.random()*TNON.length)].toUpperCase();
+  const h=Math.floor(Math.random()*0xFFFFFF).toString(16).toUpperCase().padStart(6,'0');
+  return `${p} ${v}_${n} [0x${h}]`;
+}
+function spawnHL(){
+  if(hLines.length>5) return;
+  hLines.push({y:Math.floor(Math.random()*rows),op:0,ph:'in',text:genHL(),scroll:0,spd:0.4+Math.random()*0.7,t:0});
+}
+function updHL(){
+  for(let i=hLines.length-1;i>=0;i--){
+    const h=hLines[i]; h.scroll+=h.spd;
+    if(h.ph==='in'){h.op=Math.min(1,h.op+0.04);if(h.op>=1)h.ph='hold';}
+    if(h.ph==='hold'){h.t++;if(h.t>100)h.ph='out';}
+    if(h.ph==='out'){h.op=Math.max(0,h.op-0.025);if(h.op<=0)hLines.splice(i,1);}
+  }
+  if(Math.random()<0.007) spawnHL();
+}
+function drawHL(pal){
+  ctx.font=`11px 'Courier New',monospace`;
+  ctx.shadowBlur=0;
+  for(const h of hLines){
+    ctx.globalAlpha=h.op*0.4;
+    ctx.fillStyle=pal.accent;
+    ctx.fillText(h.text,-(h.scroll%(W+700))+80,h.y*FS);
+  }
+  ctx.globalAlpha=1;
+}
+
+// ═══════════════════════════════════════════════════════════
+// GLITCH
+// ═══════════════════════════════════════════════════════════
+let gGlitch=0;
+function trigGlitch(){gGlitch=6+Math.floor(Math.random()*10);}
+function drawGlitch(){
+  if(gGlitch<=0) return;
+  for(let i=0;i<Math.floor(gGlitch/2);i++){
+    try{
+      const sy=Math.random()*H,sh=2+Math.random()*10,sx=(Math.random()-0.5)*35;
+      ctx.putImageData(ctx.getImageData(0,sy,W,sh),sx,sy);
+    }catch(e){}
+  }
+  gGlitch--;
+}
+
+// ═══════════════════════════════════════════════════════════
+// BOUCLE
+// ═══════════════════════════════════════════════════════════
+const fpsEl=document.getElementById('fps');
+const clockEl=document.getElementById('clock');
+let lt=0,fc=0,ft=0;
+
+function updClock(){
+  const n=new Date();
+  if(clockEl) clockEl.textContent=[n.getHours(),n.getMinutes(),n.getSeconds()].map(v=>v.toString().padStart(2,'0')).join(':');
+}
+
+function loop(ts){
+  const dt=ts-lt; lt=ts; fc++; ft+=dt; palCycle++;
+  if(ft>1000){if(fpsEl)fpsEl.textContent=Math.round(fc*1000/ft);fc=0;ft=0;updClock();}
+
+  palBlend=(palCycle%PAL_DUR)/PAL_DUR;
+  if(palCycle%PAL_DUR===0){curPI=nxtPI;nxtPI=(nxtPI+1)%PALETTES.length;}
+  const pal=getPal();
+
+  ctx.fillStyle='rgba(0,0,0,0.082)';
+  ctx.fillRect(0,0,W,H);
+
+  drawHandAuras();
+  streams.forEach(updStream);
+  updSparks(); updHL(); updBridge(); updTerminals();
+  if(Math.random()<0.001) trigGlitch();
+
+  drawStreams(pal);
+  drawSparks();
+  drawHL(pal);
+  drawBridge();
+  drawGlitch();
+
+  requestAnimationFrame(loop);
+}
+
+function resize(){
+  W=canvas.width=window.innerWidth;
+  H=canvas.height=window.innerHeight;
+  initStreams();
+  // Repositionner les terminaux au centre des quadrants
+  const tA=document.getElementById('term-a');
+  const tB=document.getElementById('term-b');
+  if(tA){ tA.style.left=(W*0.25-170)+'px'; tA.style.top=(H*0.5-280)+'px'; }
+  if(tB){ tB.style.left=(W*0.75-170)+'px'; tB.style.top=(H*0.5+20)+'px'; }
+}
+
+window.addEventListener('resize',resize);
+resize();
+for(let i=0;i<3;i++) spawnHL();
+autoSeedTerminals();
+requestAnimationFrame(loop);
+window.addEventListener('load',()=>{setTimeout(initHands,600);});
+document.addEventListener('dblclick',()=>{
+  if(!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+  else document.exitFullscreen?.();
+});
+</script>
+</body>
+</html>

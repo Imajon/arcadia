@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NUMFALL — La pluie de nombres</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@200;400;600;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #04050d;
+  --grid: rgba(255,255,255,0.028);
+  --accent: #00f5c4;
+  --accent2: #ff3e6c;
+  --accent3: #f5c400;
+  --panel: rgba(8,12,28,0.92);
+  --border: rgba(0,245,196,0.15);
+  --text: #e8eaf6;
+  --muted: rgba(232,234,246,0.35);
+  --good: #00f5c4;
+  --bad: #ff3e6c;
+  --neutral: #7b8cde;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%; height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Exo 2', sans-serif;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* ── Grille de fond ── */
+#bg-grid {
+  position: fixed; inset: 0; z-index: 0;
+  background-image:
+    linear-gradient(rgba(0,245,196,0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,245,196,0.028) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+}
+
+/* Perspective lines */
+#bg-grid::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse 80% 60% at 50% 100%, rgba(0,245,196,0.07) 0%, transparent 70%);
+}
+
+/* ── Canvas principal ── */
+#game-canvas {
+  position: fixed; inset: 0; z-index: 1;
+  width: 100%; height: 100%;
+}
+
+/* ── HUD ── */
+#hud {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+  display: flex; align-items: stretch;
+  height: 58px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(4,5,13,0.98) 0%, rgba(4,5,13,0.0) 100%);
+}
+
+.hud-block {
+  display: flex; flex-direction: column;
+  justify-content: center; align-items: center;
+  padding: 0 24px;
+  border-right: 1px solid var(--border);
+  min-width: 120px;
+}
+.hud-block:last-child { border-right: none; margin-left: auto; }
+
+.hud-label {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 9px; letter-spacing: 0.2em;
+  color: var(--accent); opacity: 0.6;
+  text-transform: uppercase; margin-bottom: 3px;
+}
+
+.hud-value {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 22px; font-weight: 400;
+  color: var(--text); line-height: 1;
+}
+
+.hud-lives { display: flex; gap: 5px; align-items: center; }
+.life-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  transition: all 0.3s;
+}
+.life-dot.lost { background: rgba(255,255,255,0.1); box-shadow: none; }
+
+/* Mission courante */
+#mission-bar {
+  position: fixed; top: 58px; left: 0; right: 0; z-index: 10;
+  display: flex; align-items: center; justify-content: center;
+  gap: 12px; padding: 6px 20px;
+  background: rgba(0,245,196,0.05);
+  border-bottom: 1px solid rgba(0,245,196,0.08);
+}
+
+#mission-text {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 13px; color: var(--accent);
+  letter-spacing: 0.08em;
+}
+
+#blind-badge {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px; padding: 2px 8px;
+  border: 1px solid var(--accent2);
+  border-radius: 3px; color: var(--accent2);
+  letter-spacing: 0.1em;
+  display: none;
+}
+
+/* ── Fact ticker ── */
+#fact-ticker {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
+  height: 40px; display: flex; align-items: center;
+  border-top: 1px solid var(--border);
+  background: linear-gradient(0deg, rgba(4,5,13,0.98) 0%, rgba(4,5,13,0) 100%);
+  overflow: hidden;
+  padding: 0 20px;
+}
+
+#fact-inner {
+  display: flex; align-items: center; gap: 12px;
+  font-size: 13px; color: var(--muted);
+  white-space: nowrap;
+}
+
+#fact-icon { font-size: 16px; flex-shrink: 0; }
+#fact-content { font-size: 12px; color: rgba(232,234,246,0.55); letter-spacing: 0.02em; }
+
+/* ── Scan lines overlay ── */
+#scanlines {
+  position: fixed; inset: 0; z-index: 9;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.03) 2px,
+    rgba(0,0,0,0.03) 4px
+  );
+}
+
+/* ── Écrans overlay (start / gameover) ── */
+#overlay {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: rgba(4,5,13,0.94);
+  backdrop-filter: blur(4px);
+}
+
+.overlay-logo {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 48px; letter-spacing: 0.15em;
+  color: var(--accent);
+  text-shadow: 0 0 30px rgba(0,245,196,0.5), 0 0 60px rgba(0,245,196,0.2);
+  margin-bottom: 4px;
+}
+
+.overlay-sub {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px; letter-spacing: 0.3em;
+  color: var(--muted); margin-bottom: 40px;
+}
+
+.overlay-mission {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 14px; color: var(--accent);
+  background: rgba(0,245,196,0.06);
+  border: 1px solid rgba(0,245,196,0.2);
+  border-radius: 4px; padding: 12px 28px;
+  margin-bottom: 10px; text-align: center;
+  letter-spacing: 0.05em; line-height: 1.8;
+}
+
+.overlay-stat-row {
+  display: flex; gap: 20px; margin-bottom: 32px;
+}
+
+.overlay-stat {
+  text-align: center;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 4px; padding: 10px 20px;
+}
+.overlay-stat-v {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 26px; color: var(--accent); display: block;
+}
+.overlay-stat-l {
+  font-size: 10px; color: var(--muted);
+  letter-spacing: 0.15em; text-transform: uppercase;
+}
+
+.start-btn {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 14px; letter-spacing: 0.2em;
+  color: var(--bg); background: var(--accent);
+  border: none; border-radius: 3px;
+  padding: 14px 48px; cursor: pointer;
+  text-transform: uppercase;
+  transition: all 0.15s;
+  box-shadow: 0 0 20px rgba(0,245,196,0.3);
+}
+.start-btn:hover { box-shadow: 0 0 35px rgba(0,245,196,0.5); transform: translateY(-1px); }
+
+.key-hint {
+  margin-top: 16px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px; color: var(--muted);
+  letter-spacing: 0.1em;
+}
+
+.key-hint kbd {
+  display: inline-block;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 3px; padding: 1px 6px;
+  font-family: inherit; font-size: 10px;
+  color: rgba(255,255,255,0.5);
+}
+
+/* Difficulté adaptive indicator */
+#adapt-badge {
+  position: fixed; top: 100px; right: 20px; z-index: 15;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px; letter-spacing: 0.1em;
+  color: var(--muted); text-align: right;
+  pointer-events: none;
+}
+.adapt-line { margin-bottom: 4px; }
+.adapt-val { color: var(--accent); }
+
+/* Flash action */
+#flash {
+  position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 36px; pointer-events: none;
+  z-index: 50; opacity: 0;
+  transition: opacity 0.08s;
+  letter-spacing: 0.1em;
+}
+
+/* Speed gauge */
+#speed-bar {
+  position: fixed; left: 0; top: 58px; bottom: 40px;
+  width: 3px; z-index: 10;
+  background: rgba(255,255,255,0.04);
+}
+#speed-fill {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: linear-gradient(0deg, var(--accent2), var(--accent));
+  transition: height 0.5s ease;
+}
+
+/* Difficulty ring */
+#diff-ring {
+  position: fixed; right: 20px; bottom: 60px; z-index: 10;
+  width: 50px; height: 50px;
+}
+</style>
+</head>
+<body>
+
+<div id="bg-grid"></div>
+<div id="scanlines"></div>
+<canvas id="game-canvas"></canvas>
+
+<!-- HUD -->
+<div id="hud">
+  <div class="hud-block">
+    <div class="hud-label">SCORE</div>
+    <div class="hud-value" id="h-score">000000</div>
+  </div>
+  <div class="hud-block">
+    <div class="hud-label">NIVEAU</div>
+    <div class="hud-value" id="h-level">01</div>
+  </div>
+  <div class="hud-block">
+    <div class="hud-label">COMBO</div>
+    <div class="hud-value" id="h-combo">×1</div>
+  </div>
+  <div class="hud-block">
+    <div class="hud-label">VIES</div>
+    <div class="hud-lives" id="h-lives">
+      <div class="life-dot"></div>
+      <div class="life-dot"></div>
+      <div class="life-dot"></div>
+    </div>
+  </div>
+  <div class="hud-block">
+    <div class="hud-label">VITESSE</div>
+    <div class="hud-value" id="h-speed">1.0×</div>
+  </div>
+</div>
+
+<div id="mission-bar">
+  <div id="mission-text">ATTRAPE LES MULTIPLES DE 2</div>
+  <div id="blind-badge">MODE AVEUGLE</div>
+</div>
+
+<!-- Speed bar -->
+<div id="speed-bar"><div id="speed-fill" style="height:10%"></div></div>
+
+<!-- Diff ring -->
+<svg id="diff-ring" viewBox="0 0 50 50">
+  <circle cx="25" cy="25" r="20" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="3"/>
+  <circle id="diff-fill" cx="25" cy="25" r="20" fill="none"
+    stroke="#f5c400" stroke-width="3"
+    stroke-dasharray="125.6" stroke-dashoffset="125.6"
+    stroke-linecap="round" transform="rotate(-90 25 25)"/>
+  <text x="25" y="29" text-anchor="middle" font-family="Share Tech Mono" font-size="9" fill="rgba(245,196,0,0.7)">DIFF</text>
+</svg>
+
+<!-- Adapt badge -->
+<div id="adapt-badge">
+  <div class="adapt-line">SESSIONS <span class="adapt-val" id="ab-sessions">1</span></div>
+  <div class="adapt-line">MÉMOIRE <span class="adapt-val" id="ab-mem">—</span></div>
+</div>
+
+<!-- Fact ticker -->
+<div id="fact-ticker">
+  <div id="fact-inner">
+    <span id="fact-icon">✦</span>
+    <span id="fact-content">Attrape les bons nombres avant qu'ils touchent le sol !</span>
+  </div>
+</div>
+
+<!-- Flash -->
+<div id="flash"></div>
+
+<!-- Overlay -->
+<div id="overlay">
+  <div class="overlay-logo">NUMFALL</div>
+  <div class="overlay-sub">LA PLUIE DE NOMBRES</div>
+  <div class="overlay-mission" id="ov-mission">
+    OBJECTIF : ATTRAPE LES MULTIPLES DE 2<br>
+    <span style="font-size:11px;opacity:0.6">Laisse tomber les autres</span>
+  </div>
+  <div class="overlay-stat-row" id="ov-stats" style="display:none">
+    <div class="overlay-stat"><span class="overlay-stat-v" id="ov-score">0</span><span class="overlay-stat-l">Score</span></div>
+    <div class="overlay-stat"><span class="overlay-stat-v" id="ov-level">1</span><span class="overlay-stat-l">Niveau max</span></div>
+    <div class="overlay-stat"><span class="overlay-stat-v" id="ov-combo">1</span><span class="overlay-stat-l">Meilleur combo</span></div>
+  </div>
+  <button class="start-btn" id="start-btn">INITIALISER</button>
+  <div class="key-hint"><kbd>←</kbd> <kbd>→</kbd> déplacer &nbsp;·&nbsp; <kbd>ESPACE</kbd> attraper</div>
+</div>
+
+<script>
+/* ════════════════════════════════════════════════════════════
+   NUMFALL — Système de difficulté adaptative
+════════════════════════════════════════════════════════════ */
+
+const canvas = document.getElementById('game-canvas');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* ── Mémoire inter-parties (persistée en sessionStorage) ── */
+const MEM_KEY = 'numfall_adaptive';
+function loadMemory() {
+  try { return JSON.parse(sessionStorage.getItem(MEM_KEY)) || defaultMemory(); }
+  catch { return defaultMemory(); }
+}
+function saveMemory(m) { sessionStorage.setItem(MEM_KEY, JSON.stringify(m)); }
+function defaultMemory() {
+  return {
+    sessions: 0,
+    avgScore: 0,
+    avgLevel: 1,
+    avgSurvival: 1.0,  // ratio vies restantes / 3 à la fin
+    startSpeed: 0.8,
+    startMultIndex: 0,
+    startBlind: false,
+    bestScore: 0,
+    bestLevel: 1,
+  };
+}
+
+let MEM = loadMemory();
+
+/* ── Définition des difficultés ── */
+// Multiples disponibles par palier
+const MULT_PALIERS = [
+  { mult: 2,  label: 'MULTIPLES DE 2',  range: [2,30] },
+  { mult: 3,  label: 'MULTIPLES DE 3',  range: [2,36] },
+  { mult: 5,  label: 'MULTIPLES DE 5',  range: [2,60] },
+  { mult: 7,  label: 'MULTIPLES DE 7',  range: [2,70] },
+  { mult: 2,  label: '×2 ET ×3 (×6)',   range: [2,60], dual: 3 },
+  { mult: 11, label: 'MULTIPLES DE 11', range: [2,99] },
+];
+
+// Niveaux de jeu (combo de paramètres)
+// Chaque niveau définit ce qui change par rapport au précédent
+// blindColor: les tokens n'ont plus de couleur indicatrice
+const LEVELS = [
+  // Lv1-3 : intro, couleurs visibles, multiples simples
+  { speedBase: 0.8,  multIdx: 0, blindColor: false, spawnInterval: 120, label: '01' },
+  { speedBase: 1.0,  multIdx: 0, blindColor: false, spawnInterval: 105, label: '02' },
+  { speedBase: 1.15, multIdx: 0, blindColor: false, spawnInterval: 90,  label: '03' },
+  // Lv4-6 : multiples de 3, toujours avec couleurs
+  { speedBase: 1.2,  multIdx: 1, blindColor: false, spawnInterval: 85,  label: '04' },
+  { speedBase: 1.35, multIdx: 1, blindColor: false, spawnInterval: 75,  label: '05' },
+  { speedBase: 1.5,  multIdx: 1, blindColor: false, spawnInterval: 65,  label: '06' },
+  // Lv7-9 : couleurs estompées (40% opacité)
+  { speedBase: 1.5,  multIdx: 2, blindColor: 'dim', spawnInterval: 65,  label: '07' },
+  { speedBase: 1.65, multIdx: 2, blindColor: 'dim', spawnInterval: 58,  label: '08' },
+  { speedBase: 1.8,  multIdx: 3, blindColor: 'dim', spawnInterval: 52,  label: '09' },
+  // Lv10-12 : couleurs totalement masquées (mode aveugle)
+  { speedBase: 1.8,  multIdx: 4, blindColor: 'full', spawnInterval: 52, label: '10' },
+  { speedBase: 2.0,  multIdx: 4, blindColor: 'full', spawnInterval: 45, label: '11' },
+  { speedBase: 2.2,  multIdx: 5, blindColor: 'full', spawnInterval: 38, label: '12' },
+];
+
+/* ── État de jeu ── */
+let state = 'idle';
+let score = 0, lives = 3, combo = 0, maxCombo = 1;
+let levelIdx = 0;
+let currentSpeed = 1.0;  // multiplicateur courant (monte selon bonnes réponses)
+let correctStreak = 0;   // bonnes réponses consécutives → accélère
+let wrongStreak = 0;     // mauvaises → vitesse ne change pas
+let drops = [], particles = [], trails = [];
+let spawnTimer = 0;
+let catcherX = 0;
+let keys = {};
+let gameStartTime = 0;
+let factTimer = 0;
+let sessionScore = 0, sessionMaxLevel = 1, sessionBestCombo = 1;
+let lastLostFast = false; // perdu rapidement ?
+
+/* ── Barre du joueur (catcher) ── */
+const CATCHER_W_BASE = 80;
+let catcherW = CATCHER_W_BASE;
+const CATCHER_H = 12;
+const CATCHER_Y_RATIO = 0.85;
+
+/* ── Facts insolites ── */
+const FACTS = [
+  { icon: '🐙', text: 'Une pieuvre a 3 cœurs — 3 est impair, mais il bat en rythme ternaire !' },
+  { icon: '🌍', text: 'La Terre tourne à 1 674 km/h. 1 674 = 2 × 3 × 279 — multiple de 6 !' },
+  { icon: '🦷', text: '32 dents humaines. 32 = 2⁵ — une puissance de deux parfaite !' },
+  { icon: '🐝', text: 'Une ruche : 60 000 abeilles. 60 000 = multiple de 2, 3, 4, 5, 6, 10...' },
+  { icon: '🌙', text: 'La Lune est à 384 400 km. 384 400 = 2³ × 5² × 1922 — très pair !' },
+  { icon: '🐘', text: 'Un éléphant pèse 6 000 kg. 6 = 2×3 — le premier multiple parfait !' },
+  { icon: '🦋', text: 'Tout insecte a 6 pattes. 6 = 2 × 3 — les insectes aiment les multiples !' },
+  { icon: '⭐', text: 'Le Soleil a 4,6 milliards d\'années. 46 est multiple de 2 — étoile paire !' },
+  { icon: '🏔️', text: 'L\'Everest : 8 849 m. 8 849 est impair — les sommets ne se divisent pas !' },
+  { icon: '🐠', text: 'Le poisson-clown change de sexe. Clown = 5 lettres — nombre premier !' },
+  { icon: '🌈', text: '7 couleurs dans l\'arc-en-ciel. 7 est premier — il refuse d\'être divisé !' },
+  { icon: '🧠', text: '86 milliards de neurones. 86 = 2 × 43 — ton cerveau est multiple de 2 !' },
+  { icon: '🦈', text: 'Le requin a 40 000 dents dans sa vie. 40 000 = 2⁶ × 5⁴ × 5 !' },
+  { icon: '🚀', text: 'Apollo 11 : 8 jours de voyage. 8 = 2³ — la Lune aime les puissances de 2 !' },
+];
+
+let usedFacts = [];
+function getNextFact() {
+  if (usedFacts.length >= FACTS.length) usedFacts = [];
+  const available = FACTS.filter((_,i) => !usedFacts.includes(i));
+  const idx = Math.floor(Math.random() * available.length);
+  const fact = available[idx];
+  usedFacts.push(FACTS.indexOf(fact));
+  return fact;
+}
+
+function showFact(fact) {
+  document.getElementById('fact-icon').textContent = fact.icon;
+  document.getElementById('fact-content').textContent = fact.text;
+  factTimer = 300;
+}
+
+/* ── Niveau courant ── */
+function lvl() { return LEVELS[Math.min(levelIdx, LEVELS.length-1)]; }
+function multCfg() { return MULT_PALIERS[lvl().multIdx]; }
+
+function isTarget(n) {
+  const cfg = multCfg();
+  if (cfg.dual) return n % cfg.mult === 0 && n % cfg.dual === 0;
+  return n % cfg.mult === 0;
+}
+
+function randNum() {
+  const cfg = multCfg();
+  return cfg.range[0] + Math.floor(Math.random() * (cfg.range[1] - cfg.range[0] + 1));
+}
+
+/* ── Spawn ── */
+function spawnDrop() {
+  const target = Math.random() < 0.42;
+  let n;
+  if (target) {
+    let tries = 0;
+    do { n = randNum(); tries++; } while (!isTarget(n) && tries < 40);
+    if (!isTarget(n)) return;
+  } else {
+    let tries = 0;
+    do { n = randNum(); tries++; } while (isTarget(n) && tries < 40);
+    if (isTarget(n)) return;
+  }
+
+  const speed = lvl().speedBase * currentSpeed * (0.88 + Math.random() * 0.24);
+  const blind = lvl().blindColor;
+  // couleur selon blindColor
+  let color, glowColor;
+  if (!blind) {
+    color = target ? '#00f5c4' : '#ff3e6c';
+    glowColor = target ? 'rgba(0,245,196,0.4)' : 'rgba(255,62,108,0.4)';
+  } else if (blind === 'dim') {
+    // estompage : couleur très atténuée
+    const base = target ? '0,245,196' : '255,62,108';
+    color = `rgba(${base},0.25)`;
+    glowColor = `rgba(${base},0.12)`;
+  } else {
+    // full blind : blanc neutre
+    color = 'rgba(180,190,220,0.55)';
+    glowColor = 'rgba(180,190,220,0.1)';
+  }
+
+  drops.push({
+    x: 40 + Math.random() * (W - 80),
+    y: -36,
+    n, target, speed,
+    r: 22 + Math.floor(Math.random() * 8),
+    color, glowColor,
+    alpha: 1,
+    caught: false, missed: false,
+    trail: [],
+    wobble: (Math.random()-0.5)*0.3,
+    wobblePhase: Math.random()*Math.PI*2,
+  });
+}
+
+/* ── Particles ── */
+function burst(x, y, color, count) {
+  for (let i=0; i<count; i++) {
+    const a = Math.random()*Math.PI*2;
+    const s = 2+Math.random()*5;
+    particles.push({ x,y, vx:Math.cos(a)*s, vy:Math.sin(a)*s-3, alpha:1, color, r:2+Math.random()*3, life:1 });
+  }
+}
+
+function burstText(x, y, text, color) {
+  trails.push({ x, y, text, color, alpha:1, vy:-2, life:1 });
+}
+
+/* ── Catcher ── */
+function getCatcherY() { return H * CATCHER_Y_RATIO; }
+
+function drawCatcher() {
+  const x = catcherX - catcherW/2;
+  const y = getCatcherY();
+  // Glow
+  ctx.shadowBlur = 18;
+  ctx.shadowColor = 'rgba(0,245,196,0.6)';
+  // Corps
+  const grad = ctx.createLinearGradient(x,y,x+catcherW,y);
+  grad.addColorStop(0,'rgba(0,245,196,0.1)');
+  grad.addColorStop(0.5,'rgba(0,245,196,0.6)');
+  grad.addColorStop(1,'rgba(0,245,196,0.1)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.roundRect(x, y, catcherW, CATCHER_H, 6);
+  ctx.fill();
+  // Ligne centrale brillante
+  ctx.fillStyle = 'rgba(0,245,196,0.9)';
+  ctx.beginPath();
+  ctx.roundRect(x+10, y+4, catcherW-20, 4, 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
+/* ── Draw drop ── */
+function drawDrop(d, frame) {
+  ctx.save();
+  ctx.globalAlpha = d.alpha;
+
+  // Traîne
+  for (let i=0; i<d.trail.length; i++) {
+    const t = d.trail[i];
+    ctx.globalAlpha = d.alpha * t.a * 0.3;
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, d.r * 0.5, 0, Math.PI*2);
+    ctx.fillStyle = d.glowColor;
+    ctx.fill();
+  }
+  ctx.globalAlpha = d.alpha;
+
+  // Glow halo
+  const grd = ctx.createRadialGradient(d.x,d.y,0,d.x,d.y,d.r*1.8);
+  grd.addColorStop(0, d.glowColor);
+  grd.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.beginPath();
+  ctx.arc(d.x,d.y,d.r*1.8,0,Math.PI*2);
+  ctx.fillStyle = grd;
+  ctx.fill();
+
+  // Hexagone (token tech)
+  ctx.beginPath();
+  for (let i=0;i<6;i++) {
+    const angle = (Math.PI/3)*i - Math.PI/6;
+    const px = d.x + d.r * Math.cos(angle);
+    const py = d.y + d.r * Math.sin(angle);
+    i===0 ? ctx.moveTo(px,py) : ctx.lineTo(px,py);
+  }
+  ctx.closePath();
+  ctx.strokeStyle = d.color;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(4,5,13,0.75)';
+  ctx.fill();
+
+  // Numéro
+  ctx.fillStyle = d.color;
+  ctx.font = `600 ${d.r*0.85}px 'Share Tech Mono', monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(d.n, d.x, d.y + 1);
+
+  ctx.restore();
+}
+
+/* ── Particules et trails ── */
+function updateParticles() {
+  particles.forEach(p=>{
+    p.x+=p.vx; p.y+=p.vy; p.vy+=0.12; p.alpha-=0.03; p.life-=0.03;
+  });
+  particles=particles.filter(p=>p.alpha>0);
+  trails.forEach(t=>{
+    t.y+=t.vy; t.alpha-=0.025; t.life-=0.025;
+  });
+  trails=trails.filter(t=>t.alpha>0);
+}
+
+function drawParticles() {
+  particles.forEach(p=>{
+    ctx.save(); ctx.globalAlpha=p.alpha;
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+    ctx.fillStyle=p.color; ctx.fill();
+    ctx.restore();
+  });
+  trails.forEach(t=>{
+    ctx.save(); ctx.globalAlpha=t.alpha;
+    ctx.font=`700 14px 'Share Tech Mono',monospace`;
+    ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillStyle=t.color; ctx.fillText(t.text,t.x,t.y);
+    ctx.restore();
+  });
+}
+
+/* ── Fond scanlines animé ── */
+let frame=0;
+function drawBg() {
+  ctx.fillStyle='rgba(4,5,13,0.25)';
+  ctx.fillRect(0,0,W,H);
+  // Lignes horizontales légères animées
+  for (let y=0; y<H; y+=80) {
+    const yy = (y + frame*0.3) % H;
+    ctx.fillStyle=`rgba(0,245,196,${0.012 + Math.sin(frame*0.02+y*0.1)*0.006})`;
+    ctx.fillRect(0,yy,W,1);
+  }
+}
+
+/* ── HUD updates ── */
+function updateHUD() {
+  document.getElementById('h-score').textContent = String(score).padStart(6,'0');
+  document.getElementById('h-level').textContent = String(levelIdx+1).padStart(2,'0');
+  document.getElementById('h-combo').textContent = `×${combo>0?combo:1}`;
+  document.getElementById('h-speed').textContent = currentSpeed.toFixed(1)+'×';
+
+  // Lives
+  const dots = document.querySelectorAll('.life-dot');
+  dots.forEach((d,i)=>{ d.classList.toggle('lost', i>=lives); });
+
+  // Speed bar
+  const pct = Math.min(100, ((currentSpeed-0.8)/2.2)*100);
+  document.getElementById('speed-fill').style.height = pct+'%';
+
+  // Diff ring (levelIdx / max levels)
+  const diffPct = levelIdx / (LEVELS.length-1);
+  const circ=125.6;
+  document.getElementById('diff-fill').style.strokeDashoffset = circ*(1-diffPct);
+
+  // Mission
+  document.getElementById('mission-text').textContent = 'ATTRAPE LES '+multCfg().label;
+  const blind=lvl().blindColor;
+  const badge=document.getElementById('blind-badge');
+  badge.style.display = blind ? 'block' : 'none';
+  badge.textContent = blind==='dim' ? 'INDICES RÉDUITS' : blind==='full' ? 'MODE AVEUGLE' : '';
+
+  // Adapt badge
+  document.getElementById('ab-sessions').textContent = MEM.sessions;
+  document.getElementById('ab-mem').textContent = MEM.sessions>1 ?
+    `vitesse ${MEM.startSpeed.toFixed(1)}× / lv${MEM.startMultIndex+1}` : '—';
+}
+
+/* ── Gestion des niveaux ── */
+let streakForNextLevel = 8; // bonnes réponses pour passer au niveau suivant
+
+function onGoodCatch() {
+  correctStreak++;
+  wrongStreak = 0;
+  combo++;
+  maxCombo = Math.max(maxCombo, combo);
+  const pts = 10 * Math.max(1, combo);
+  score += pts;
+
+  // Accélération progressive à chaque bonne réponse
+  const accelRate = 0.015 + levelIdx * 0.005;
+  currentSpeed = Math.min(3.5, currentSpeed + accelRate);
+
+  // Passage de niveau ?
+  if (correctStreak >= streakForNextLevel && levelIdx < LEVELS.length-1) {
+    levelIdx++;
+    correctStreak = 0;
+    streakForNextLevel = 6 + levelIdx * 2; // plus dur à monter
+    sessionMaxLevel = Math.max(sessionMaxLevel, levelIdx+1);
+    flashMsg(`NIVEAU ${levelIdx+1}`, '#f5c400');
+    showFact(getNextFact());
+  }
+}
+
+function onBadCatch() {
+  combo = 0;
+  wrongStreak++;
+  correctStreak = Math.max(0, correctStreak-2);
+  lives--;
+  // Vitesse : ne CHANGE PAS quand on échoue
+  updateLives();
+  if (lives <= 0) { setTimeout(endGame, 400); }
+}
+
+function onMissTarget() {
+  combo = 0;
+  wrongStreak++;
+  lives--;
+  // Idem : pas de changement de vitesse
+  updateLives();
+  if (lives <= 0) { setTimeout(endGame, 400); }
+}
+
+function updateLives() {
+  updateHUD();
+}
+
+/* ── Flash message ── */
+function flashMsg(text, color='#00f5c4') {
+  const el=document.getElementById('flash');
+  el.textContent=text; el.style.color=color; el.style.opacity='1';
+  setTimeout(()=>{ el.style.opacity='0'; },900);
+}
+
+/* ── Fin de partie ── */
+function endGame() {
+  state='over';
+  const elapsed=(Date.now()-gameStartTime)/1000;
+  const survivalRatio = lives/3; // 0..1
+
+  // Calcul si perdu trop vite
+  lastLostFast = elapsed < 30 && lives === 0;
+
+  // Mise à jour mémoire adaptative
+  MEM.sessions++;
+  MEM.avgScore = (MEM.avgScore*(MEM.sessions-1)+score)/MEM.sessions;
+  MEM.avgLevel = (MEM.avgLevel*(MEM.sessions-1)+sessionMaxLevel)/MEM.sessions;
+  MEM.avgSurvival = (MEM.avgSurvival*(MEM.sessions-1)+survivalRatio)/MEM.sessions;
+  MEM.bestScore = Math.max(MEM.bestScore, score);
+  MEM.bestLevel = Math.max(MEM.bestLevel, sessionMaxLevel);
+
+  // Ajustement pour la prochaine partie
+  if (MEM.sessions >= 2) {
+    if (lastLostFast && MEM.avgSurvival < 0.2) {
+      // Perdu très vite régulièrement → réduire la difficulté de départ
+      MEM.startSpeed = Math.max(0.7, MEM.startSpeed - 0.1);
+      MEM.startMultIndex = Math.max(0, MEM.startMultIndex - 1);
+    } else if (MEM.avgSurvival > 0.6 && sessionMaxLevel >= 5) {
+      // Survit bien → augmenter la difficulté de départ
+      MEM.startSpeed = Math.min(1.5, MEM.startSpeed + 0.08);
+      MEM.startMultIndex = Math.min(2, MEM.startMultIndex + 1);
+    } else if (MEM.avgSurvival > 0.4) {
+      // Maintien léger
+      MEM.startSpeed = Math.min(1.3, MEM.startSpeed + 0.04);
+    }
+    // Si perdu plusieurs fois de suite rapidement : réinitialise
+    if (lastLostFast && MEM.avgSurvival < 0.1 && MEM.sessions >= 4) {
+      MEM.startSpeed = 0.8; MEM.startMultIndex = 0;
+    }
+  }
+  saveMemory(MEM);
+
+  // Affiche overlay
+  document.getElementById('ov-score').textContent = String(score).padStart(6,'0');
+  document.getElementById('ov-level').textContent = sessionMaxLevel;
+  document.getElementById('ov-combo').textContent = '×'+maxCombo;
+  document.getElementById('ov-stats').style.display='flex';
+  document.getElementById('ov-mission').innerHTML =
+    score > MEM.avgScore*1.1
+      ? `EXCELLENT ! <br><span style="font-size:11px;opacity:0.6">Meilleur que ta moyenne</span>`
+      : `PARTIE TERMINÉE<br><span style="font-size:11px;opacity:0.6">Score moyen : ${Math.round(MEM.avgScore)}</span>`;
+  document.getElementById('start-btn').textContent = 'RECOMMENCER';
+  document.getElementById('overlay').style.display='flex';
+}
+
+/* ── Reset & Start ── */
+function resetGame() {
+  score=0; lives=3; combo=0; maxCombo=1;
+  correctStreak=0; wrongStreak=0;
+  sessionScore=0; sessionMaxLevel=1; sessionBestCombo=1;
+  drops=[]; particles=[]; trails=[];
+  spawnTimer=0; frame=0;
+  gameStartTime=Date.now();
+
+  // Appliquer la difficulté mémorisée
+  levelIdx = MEM.sessions > 1 ? Math.min(MEM.startMultIndex * 3, LEVELS.length-1) : 0;
+  currentSpeed = MEM.sessions > 1 ? MEM.startSpeed : 0.8;
+  streakForNextLevel = 8;
+
+  catcherX = W/2;
+  updateHUD();
+}
+
+function startGame() {
+  document.getElementById('overlay').style.display='none';
+  state='playing';
+  resetGame();
+  loop();
+}
+
+/* ── Boucle principale ── */
+function loop() {
+  if (state!=='playing') return;
+  frame++;
+
+  // Mouvement catcher
+  const spd=7+levelIdx*0.3;
+  if (keys['ArrowLeft']||keys['a']) catcherX=Math.max(catcherW/2+5,catcherX-spd);
+  if (keys['ArrowRight']||keys['d']) catcherX=Math.min(W-catcherW/2-5,catcherX+spd);
+
+  // Spawn
+  const si = Math.max(30, lvl().spawnInterval - Math.floor((currentSpeed-0.8)*15));
+  spawnTimer++;
+  if (spawnTimer>=si) { spawnDrop(); spawnTimer=0; }
+
+  // Dessin
+  ctx.clearRect(0,0,W,H);
+  drawBg();
+
+  // Zone de jeu (entre HUD haut et ticker bas)
+  const topY=100, bottomY=H-42;
+  const cy=getCatcherY();
+
+  // Update drops
+  drops.forEach(d=>{
+    const wobble=Math.sin(frame*0.05+d.wobblePhase)*d.wobble*20;
+    d.x+=wobble*0.08;
+    d.y+=d.speed;
+
+    // Trail
+    d.trail.push({x:d.x,y:d.y,a:0.6});
+    if(d.trail.length>8) d.trail.shift();
+    d.trail.forEach(t=>t.a*=0.85);
+
+    if(d.caught||d.missed) return;
+
+    // Collision
+    const dist=Math.abs(d.x-catcherX);
+    if(d.y+d.r>=cy-4 && d.y-d.r<=cy+CATCHER_H+4 && dist<catcherW/2+d.r*0.5) {
+      d.caught=true;
+      if(d.target){
+        burst(d.x,d.y,'#00f5c4',14);
+        burstText(d.x,d.y-20,`+${10*Math.max(1,combo+1)}×${combo+1}`,'#00f5c4');
+        onGoodCatch();
+        showFact(getNextFact());
+      } else {
+        burst(d.x,d.y,'#ff3e6c',10);
+        burstText(d.x,d.y-20,'✕','#ff3e6c');
+        onBadCatch();
+      }
+      updateHUD();
+    }
+
+    // Sortie écran bas
+    if(d.y-d.r>bottomY){
+      d.missed=true;
+      if(d.target){
+        burstText(d.x,bottomY-20,'MANQUÉ','rgba(255,62,108,0.8)');
+        onMissTarget();
+        updateHUD();
+      }
+    }
+  });
+
+  drops=drops.filter(d=>!(d.missed||d.caught&&d.y>H+50));
+  drops.forEach(d=>drawDrop(d,frame));
+
+  updateParticles();
+  drawParticles();
+  drawCatcher();
+
+  // Grid lignes verticales (lueur sur le catcher)
+  const grad=ctx.createLinearGradient(catcherX,topY,catcherX,bottomY);
+  grad.addColorStop(0,'rgba(0,245,196,0)');
+  grad.addColorStop(0.5,'rgba(0,245,196,0.04)');
+  grad.addColorStop(1,'rgba(0,245,196,0)');
+  ctx.fillStyle=grad;
+  ctx.fillRect(catcherX-catcherW/2,topY,catcherW,bottomY-topY);
+
+  if(factTimer>0) factTimer--;
+
+  requestAnimationFrame(loop);
+}
+
+/* ── Clavier ── */
+document.addEventListener('keydown',e=>{ keys[e.key]=true; if([' ','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault(); });
+document.addEventListener('keyup',e=>{ keys[e.key]=false; });
+
+/* ── Touch / Souris ── */
+window.addEventListener('mousemove',e=>{ if(state==='playing') catcherX=Math.max(catcherW/2,Math.min(W-catcherW/2,e.clientX)); });
+window.addEventListener('touchmove',e=>{
+  if(state!=='playing') return;
+  e.preventDefault();
+  catcherX=Math.max(catcherW/2,Math.min(W-catcherW/2,e.touches[0].clientX));
+},{passive:false});
+
+/* ── Démarrage ── */
+document.getElementById('start-btn').addEventListener('click', startGame);
+
+// Affichage initial de la mémoire
+if (MEM.sessions > 0) {
+  document.getElementById('ov-mission').innerHTML =
+    `OBJECTIF : ATTRAPE LES MULTIPLES DE ${MULT_PALIERS[MEM.startMultIndex].mult}<br><span style="font-size:11px;opacity:0.6">Difficulté ajustée : vitesse ${MEM.startSpeed.toFixed(1)}×</span>`;
+  document.getElementById('start-btn').textContent = 'RECOMMENCER';
+}
+updateHUD();
+</script>
+</body>
+</html>

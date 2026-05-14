@@ -1,0 +1,1087 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CORPUS MIROR — Studio EYA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@300;400;700&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%; height: 100%;
+    background: #000;
+    color: #e8e8e0;
+    font-family: 'Syne', sans-serif;
+    overflow: hidden;
+  }
+
+  /* ── SPLASH ── */
+  #splash {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: #000;
+    z-index: 100;
+    gap: 3rem;
+  }
+
+  .splash-title {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.4em;
+    color: #444;
+    text-transform: uppercase;
+    text-align: center;
+  }
+
+  .splash-logo {
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(36px, 6vw, 64px);
+    font-weight: 700;
+    color: #e8e8e0;
+    letter-spacing: -0.02em;
+    text-align: center;
+    line-height: 1;
+  }
+
+  .splash-sub {
+    font-size: 13px;
+    color: #444;
+    letter-spacing: 0.08em;
+    text-align: center;
+    max-width: 360px;
+    line-height: 1.7;
+  }
+
+  .mode-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    width: min(520px, 90vw);
+    border: 1px solid #1a1a1a;
+  }
+
+  .mode-btn {
+    background: #080808;
+    border: none;
+    color: #e8e8e0;
+    padding: 2.5rem 2rem;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.2s;
+    font-family: 'Syne', sans-serif;
+    position: relative;
+  }
+
+  .mode-btn:hover { background: #0f0f0f; }
+  .mode-btn:hover .mode-num { color: #888; }
+
+  .mode-num {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    color: #2a2a2a;
+    display: block;
+    margin-bottom: 1rem;
+    transition: color 0.2s;
+  }
+
+  .mode-label {
+    font-size: 18px;
+    font-weight: 700;
+    display: block;
+    margin-bottom: 0.5rem;
+    letter-spacing: 0.03em;
+  }
+
+  .mode-desc {
+    font-size: 11px;
+    color: #3a3a3a;
+    line-height: 1.6;
+    letter-spacing: 0.04em;
+  }
+
+  .mode-accent {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 2px;
+    background: transparent;
+    transition: background 0.3s;
+  }
+
+  .mode-btn[data-mode="record"]:hover .mode-accent { background: #c8a96e; }
+  .mode-btn[data-mode="observe"]:hover .mode-accent { background: #6ea8c8; }
+
+  /* ── APP ── */
+  #app {
+    display: none;
+    position: fixed; inset: 0;
+    background: #000;
+    flex-direction: column;
+  }
+
+  #app.active { display: flex; }
+
+  .app-header {
+    display: flex;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid #0f0f0f;
+    gap: 1.5rem;
+    flex-shrink: 0;
+  }
+
+  .app-logo {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.35em;
+    color: #2a2a2a;
+    white-space: nowrap;
+  }
+
+  .mode-badge {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.3em;
+    padding: 4px 12px;
+    border: 1px solid;
+    white-space: nowrap;
+  }
+
+  .mode-badge.record { color: #c8a96e; border-color: rgba(200,169,110,0.15); background: rgba(200,169,110,0.04); }
+  .mode-badge.observe { color: #6ea8c8; border-color: rgba(110,168,200,0.15); background: rgba(110,168,200,0.04); }
+
+  .app-status {
+    margin-left: auto;
+    font-size: 10px;
+    color: #2a2a2a;
+    letter-spacing: 0.12em;
+    display: flex; align-items: center; gap: 8px;
+    white-space: nowrap;
+  }
+
+  .pulse-dot {
+    display: inline-block;
+    width: 5px; height: 5px;
+    background: currentColor;
+    border-radius: 50%;
+    animation: pulse 1.5s ease infinite;
+  }
+
+  @keyframes pulse { 0%,100%{opacity:0.2} 50%{opacity:1} }
+
+  .hdr-btn {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    padding: 6px 14px;
+    background: none;
+    border: 1px solid #1a1a1a;
+    color: #333;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+
+  .hdr-btn:hover { border-color: #2a2a2a; color: #666; }
+
+  /* ── LAYOUT ── */
+  .main-area {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  /* ── CAMERA ── */
+  .camera-zone {
+    position: relative;
+    background: #030303;
+    border-right: 1px solid #0f0f0f;
+    overflow: hidden;
+  }
+
+  #video {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transform: scaleX(-1);
+  }
+
+  #canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+  }
+
+  .scan-line {
+    position: absolute;
+    left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(110,168,200,0.1), rgba(110,168,200,0.6), rgba(110,168,200,0.1), transparent);
+    animation: scan 5s ease-in-out infinite;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .scan-line.active { opacity: 1; }
+  @keyframes scan { 0%{top:0%} 100%{top:100%} }
+
+  .camera-overlay {
+    position: absolute; inset: 0;
+    pointer-events: none;
+  }
+
+  .corner {
+    position: absolute;
+    width: 22px; height: 22px;
+    border-color: #1c2c3a;
+    border-style: solid;
+  }
+  .corner.tl { top:18px; left:18px; border-width:1px 0 0 1px; }
+  .corner.tr { top:18px; right:18px; border-width:1px 1px 0 0; }
+  .corner.bl { bottom:18px; left:18px; border-width:0 0 1px 1px; }
+  .corner.br { bottom:18px; right:18px; border-width:0 1px 1px 0; }
+
+  .cam-pose-label {
+    position: absolute;
+    bottom: 1.5rem; left: 1.5rem;
+    font-family: 'Space Mono', monospace;
+    font-size: 8px;
+    letter-spacing: 0.35em;
+    color: #222;
+  }
+
+  .confidence-bar {
+    position: absolute;
+    bottom: 1.5rem; right: 1.5rem;
+    width: 80px; height: 1px;
+    background: #111;
+  }
+  .confidence-fill {
+    height: 100%;
+    background: #6ea8c8;
+    width: 0%;
+    transition: width 0.3s;
+  }
+
+  /* ── PANEL ── */
+  .panel {
+    display: flex;
+    flex-direction: column;
+    padding: 1.8rem;
+    gap: 1.5rem;
+    overflow-y: auto;
+    background: #000;
+  }
+
+  .panel::-webkit-scrollbar { width: 2px; }
+  .panel::-webkit-scrollbar-thumb { background: #111; }
+
+  .section-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 8px;
+    letter-spacing: 0.45em;
+    color: #2a2a2a;
+    margin-bottom: 1rem;
+    text-transform: uppercase;
+  }
+
+  .panel-section {
+    border-top: 1px solid #0f0f0f;
+    padding-top: 1.5rem;
+  }
+
+  /* ── RECORD MODE ── */
+  .btn-capture {
+    width: 100%;
+    padding: 1.4rem;
+    background: none;
+    border: 1px solid rgba(200,169,110,0.15);
+    color: #c8a96e;
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-capture:hover:not(:disabled) { background: rgba(200,169,110,0.05); border-color: rgba(200,169,110,0.3); }
+  .btn-capture:active:not(:disabled) { transform: scale(0.98); }
+  .btn-capture:disabled { opacity: 0.25; cursor: not-allowed; }
+
+  .poses-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+
+  .pose-thumb {
+    aspect-ratio: 3/4;
+    background: #080808;
+    border: 1px solid #111;
+    position: relative;
+    overflow: hidden;
+    cursor: default;
+  }
+
+  .pose-thumb canvas {
+    width: 100%; height: 100%;
+    display: block;
+    position: absolute; inset: 0;
+  }
+
+  .pose-thumb img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    display: block;
+    position: absolute; inset: 0;
+    opacity: 0.3;
+    mix-blend-mode: screen;
+  }
+
+  .pose-thumb .thumb-num {
+    position: absolute;
+    bottom: 4px; left: 4px;
+    font-family: 'Space Mono', monospace;
+    font-size: 7px;
+    color: #222;
+    letter-spacing: 0.1em;
+  }
+
+  .pose-thumb .delete-btn {
+    position: absolute;
+    top: 3px; right: 3px;
+    background: #111;
+    border: none;
+    color: #333;
+    width: 14px; height: 14px;
+    font-size: 7px;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+  .pose-thumb:hover .delete-btn { display: flex; }
+  .pose-thumb .delete-btn:hover { color: #888; }
+
+  .loading-msg {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'Space Mono', monospace;
+    font-size: 8px;
+    letter-spacing: 0.3em;
+    color: #1e1e1e;
+    padding: 1rem 0;
+  }
+
+  /* ── OBSERVE MODE ── */
+  .match-display {
+    position: relative;
+    aspect-ratio: 3/4;
+    background: #060606;
+    overflow: hidden;
+    border: 1px solid #0f0f0f;
+  }
+
+  .match-display img {
+    width: 100%; height: 100%;
+    object-fit: cover;
+    display: block;
+    opacity: 0;
+    transition: opacity 2s ease;
+  }
+  .match-display img.visible { opacity: 0.85; }
+
+  .match-overlay-canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    mix-blend-mode: screen;
+    pointer-events: none;
+  }
+
+  .match-flash {
+    position: absolute; inset: 0;
+    background: #6ea8c8;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 5;
+  }
+  .match-flash.active { animation: flash 0.6s ease forwards; }
+  @keyframes flash { 0%{opacity:0.25} 100%{opacity:0} }
+
+  .match-info {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    padding: 1rem;
+    background: linear-gradient(transparent, rgba(0,0,0,0.8));
+    z-index: 3;
+  }
+
+  .match-score-txt {
+    font-family: 'Space Mono', monospace;
+    font-size: 8px;
+    letter-spacing: 0.3em;
+    color: #6ea8c8;
+  }
+
+  .no-match {
+    position: absolute; inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Space Mono', monospace;
+    font-size: 8px;
+    letter-spacing: 0.25em;
+    color: #151515;
+    text-align: center;
+    line-height: 2.2;
+    z-index: 2;
+  }
+
+  .observe-count {
+    font-size: 56px;
+    font-weight: 700;
+    color: #6ea8c8;
+    letter-spacing: -0.03em;
+    line-height: 1;
+  }
+
+  .observe-count-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 8px;
+    letter-spacing: 0.4em;
+    color: #2a2a2a;
+    margin-top: 0.4rem;
+  }
+
+  /* ── TOAST ── */
+  .toast {
+    position: fixed;
+    bottom: 2rem; left: 50%;
+    transform: translateX(-50%) translateY(16px);
+    background: #080808;
+    border: 1px solid #1a1a1a;
+    padding: 0.7rem 1.5rem;
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    color: #c8a96e;
+    opacity: 0;
+    transition: all 0.3s;
+    pointer-events: none;
+    z-index: 999;
+    white-space: nowrap;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ── FULLSCREEN HINT ── */
+  .fs-hint {
+    position: fixed;
+    top: 1rem; right: 1rem;
+    font-family: 'Space Mono', monospace;
+    font-size: 8px;
+    letter-spacing: 0.2em;
+    color: #1a1a1a;
+    cursor: pointer;
+    z-index: 200;
+    transition: color 0.2s;
+  }
+  .fs-hint:hover { color: #333; }
+</style>
+</head>
+<body>
+
+<!-- SPLASH -->
+<div id="splash">
+  <div class="splash-title">Studio EYA · Dispositif Interactif</div>
+  <div class="splash-logo">CORPUS<br>MIROR</div>
+  <div class="splash-sub">Un miroir de soi au travers des autres — détection squelettique en temps réel</div>
+
+  <div class="mode-grid">
+    <button class="mode-btn" data-mode="record" onclick="startApp('record')">
+      <span class="mode-num">01</span>
+      <span class="mode-label">Enregistrement</span>
+      <span class="mode-desc">Capturez votre posture et laissez une empreinte dans le dispositif</span>
+      <div class="mode-accent"></div>
+    </button>
+    <button class="mode-btn" data-mode="observe" onclick="startApp('observe')">
+      <span class="mode-num">02</span>
+      <span class="mode-label">Observation</span>
+      <span class="mode-desc">Découvrez votre reflet dans le corps des autres visiteurs</span>
+      <div class="mode-accent"></div>
+    </button>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <div class="app-header">
+    <div class="app-logo">CORPUS MIROR</div>
+    <div id="mode-badge" class="mode-badge"></div>
+    <div class="app-status">
+      <span class="pulse-dot" style="color:#2a2a2a"></span>
+      <span id="status-text">initialisation</span>
+    </div>
+    <button class="hdr-btn" onclick="switchMode()">CHANGER MODE</button>
+    <button class="hdr-btn" onclick="goHome()">ACCUEIL</button>
+  </div>
+
+  <div class="main-area">
+    <div class="camera-zone">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="canvas"></canvas>
+      <div class="scan-line" id="scan-line"></div>
+      <div class="camera-overlay">
+        <div class="corner tl"></div>
+        <div class="corner tr"></div>
+        <div class="corner bl"></div>
+        <div class="corner br"></div>
+      </div>
+      <div class="cam-pose-label" id="pose-label">—</div>
+      <div class="confidence-bar"><div class="confidence-fill" id="conf-fill"></div></div>
+    </div>
+
+    <div class="panel" id="side-panel"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="fs-hint" onclick="toggleFullscreen()" title="Plein écran">[ F ]</div>
+
+<!-- TensorFlow + MoveNet -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
+
+<script>
+'use strict';
+
+// ── STATE ──────────────────────────────────────────────────────────────────
+let currentMode = null;
+let detector = null;
+let stream = null;
+let animFrame = null;
+let recordings = [];
+let modelLoaded = false;
+let currentPose = null;
+let matchTimer = 0;
+let lastMatchedIdx = -1;
+
+const RECORD_COLOR = '#c8a96e';
+const OBSERVE_COLOR = '#6ea8c8';
+
+const SKELETON_CONNECTIONS = [
+  [5,6],[5,7],[7,9],[6,8],[8,10],
+  [5,11],[6,12],[11,12],
+  [11,13],[13,15],[12,14],[14,16]
+];
+
+// ── UTILS ──────────────────────────────────────────────────────────────────
+function setStatus(txt) {
+  const el = document.getElementById('status-text');
+  if (el) el.textContent = txt;
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen().catch(() => {});
+  } else {
+    document.exitFullscreen().catch(() => {});
+  }
+}
+
+// F key shortcut for fullscreen
+document.addEventListener('keydown', e => {
+  if (e.key === 'f' || e.key === 'F') toggleFullscreen();
+});
+
+// ── MODEL ──────────────────────────────────────────────────────────────────
+async function loadModel() {
+  setStatus('chargement modèle…');
+  try {
+    await tf.setBackend('webgl');
+    detector = await poseDetection.createDetector(
+      poseDetection.SupportedModels.MoveNet,
+      { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING }
+    );
+    modelLoaded = true;
+    setStatus('prêt');
+    document.getElementById('scan-line').classList.add('active');
+    return true;
+  } catch (e) {
+    console.error('Model load error:', e);
+    setStatus('erreur modèle');
+    showToast('Erreur de chargement du modèle TensorFlow');
+    return false;
+  }
+}
+
+// ── CAMERA ────────────────────────────────────────────────────────────────
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+      audio: false
+    });
+    const video = document.getElementById('video');
+    video.srcObject = stream;
+    await new Promise(r => video.onloadedmetadata = r);
+    await video.play();
+    return true;
+  } catch (e) {
+    showToast('Accès caméra refusé — vérifiez les permissions');
+    setStatus('pas de caméra');
+    return false;
+  }
+}
+
+function stopCamera() {
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+}
+
+// ── APP LIFECYCLE ──────────────────────────────────────────────────────────
+async function startApp(mode) {
+  currentMode = mode;
+  document.getElementById('splash').style.display = 'none';
+  const app = document.getElementById('app');
+  app.style.display = 'flex';
+  app.classList.add('active');
+
+  const badge = document.getElementById('mode-badge');
+  badge.className = 'mode-badge ' + mode;
+  badge.textContent = mode === 'record' ? 'MODE ENREGISTREMENT' : 'MODE OBSERVATION';
+
+  renderPanel();
+  const camOk = await startCamera();
+  if (!camOk) return;
+
+  if (!modelLoaded) {
+    const ok = await loadModel();
+    if (!ok) return;
+  } else {
+    setStatus('prêt');
+  }
+
+  startDetection();
+}
+
+function switchMode() {
+  if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+  currentMode = currentMode === 'record' ? 'observe' : 'record';
+  const badge = document.getElementById('mode-badge');
+  badge.className = 'mode-badge ' + currentMode;
+  badge.textContent = currentMode === 'record' ? 'MODE ENREGISTREMENT' : 'MODE OBSERVATION';
+  lastMatchedIdx = -1;
+  renderPanel();
+  startDetection();
+}
+
+function goHome() {
+  stopCamera();
+  currentMode = null;
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('splash').style.display = 'flex';
+}
+
+// ── DETECTION LOOP ─────────────────────────────────────────────────────────
+function startDetection() {
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+
+  async function detect() {
+    if (!modelLoaded || video.readyState < 2) {
+      animFrame = requestAnimationFrame(detect);
+      return;
+    }
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    let poses = [];
+    try { poses = await detector.estimatePoses(video); } catch (_) {}
+
+    if (poses.length > 0) {
+      const pose = poses[0];
+      const score = pose.score || 0;
+      currentPose = score > 0.3 ? pose : null;
+
+      const fill = document.getElementById('conf-fill');
+      if (fill) fill.style.width = Math.round(score * 100) + '%';
+
+      const lbl = document.getElementById('pose-label');
+      if (lbl) lbl.textContent = score > 0.3 ? 'POSTURE DÉTECTÉE' : '—';
+
+      if (score > 0.3) {
+        drawSkeleton(ctx, pose.keypoints, currentMode === 'record' ? RECORD_COLOR : OBSERVE_COLOR);
+        if (currentMode === 'record') {
+          const btn = document.getElementById('capture-btn');
+          if (btn) btn.disabled = false;
+        } else {
+          matchPose(pose.keypoints);
+        }
+      } else {
+        const btn = document.getElementById('capture-btn');
+        if (btn) btn.disabled = true;
+      }
+    } else {
+      currentPose = null;
+      const fill = document.getElementById('conf-fill');
+      if (fill) fill.style.width = '0%';
+      const lbl = document.getElementById('pose-label');
+      if (lbl) lbl.textContent = '—';
+    }
+
+    animFrame = requestAnimationFrame(detect);
+  }
+
+  detect();
+}
+
+// ── DRAWING ────────────────────────────────────────────────────────────────
+function drawSkeleton(ctx, keypoints, color) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.8;
+  ctx.globalAlpha = 0.75;
+  SKELETON_CONNECTIONS.forEach(([a,b]) => {
+    const ka = keypoints[a], kb = keypoints[b];
+    if (!ka || !kb || ka.score < 0.3 || kb.score < 0.3) return;
+    ctx.beginPath();
+    ctx.moveTo(ka.x, ka.y);
+    ctx.lineTo(kb.x, kb.y);
+    ctx.stroke();
+  });
+  keypoints.forEach(k => {
+    if (k.score < 0.3) return;
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    ctx.arc(k.x, k.y, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+}
+
+function drawSkeletonMini(canvas, keypoints, color) {
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const valid = keypoints.filter(k => k.score > 0.3);
+  if (valid.length < 3) return;
+
+  const xs = valid.map(k => k.x);
+  const ys = valid.map(k => k.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const rX = maxX - minX || 1, rY = maxY - minY || 1;
+  const pad = 10;
+
+  const toP = k => ({
+    x: pad + (k.x - minX) / rX * (w - pad * 2),
+    y: pad + (k.y - minY) / rY * (h - pad * 2)
+  });
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.globalAlpha = 0.6;
+
+  SKELETON_CONNECTIONS.forEach(([a,b]) => {
+    const ka = keypoints[a], kb = keypoints[b];
+    if (!ka || !kb || ka.score < 0.3 || kb.score < 0.3) return;
+    const pa = toP(ka), pb = toP(kb);
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+    ctx.stroke();
+  });
+
+  keypoints.forEach(k => {
+    if (k.score < 0.3) return;
+    const p = toP(k);
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 1.8, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+// ── RECORD MODE ────────────────────────────────────────────────────────────
+function captureCurrentPose() {
+  if (!currentPose || currentPose.score < 0.3) return;
+
+  const video = document.getElementById('video');
+  const snap = document.createElement('canvas');
+  snap.width = video.videoWidth;
+  snap.height = video.videoHeight;
+  const sc = snap.getContext('2d');
+  sc.save();
+  sc.scale(-1, 1);
+  sc.drawImage(video, -snap.width, 0);
+  sc.restore();
+
+  recordings.push({
+    keypoints: currentPose.keypoints.map(k => ({ ...k })),
+    snapshot: snap.toDataURL('image/jpeg', 0.75),
+    timestamp: Date.now()
+  });
+
+  const btn = document.getElementById('capture-btn');
+  if (btn) {
+    const orig = btn.textContent;
+    btn.textContent = '✓ POSTURE ENREGISTRÉE';
+    setTimeout(() => { if(btn) btn.textContent = orig; }, 1500);
+  }
+
+  const wm = document.getElementById('wait-msg');
+  if (wm) wm.style.display = 'none';
+
+  renderPoseGrid();
+  showToast(`Posture ${recordings.length} enregistrée`);
+}
+
+function deleteRecording(i) {
+  recordings.splice(i, 1);
+  renderPoseGrid();
+  const wm = document.getElementById('wait-msg');
+  if (wm) wm.style.display = recordings.length > 0 ? 'none' : 'flex';
+}
+
+function renderPoseGrid() {
+  const grid = document.getElementById('poses-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+
+  recordings.forEach((rec, i) => {
+    const div = document.createElement('div');
+    div.className = 'pose-thumb';
+
+    const c = document.createElement('canvas');
+    c.width = 80; c.height = 120;
+
+    const img = document.createElement('img');
+    img.src = rec.snapshot;
+    img.alt = '';
+
+    const num = document.createElement('div');
+    num.className = 'thumb-num';
+    num.textContent = String(i + 1).padStart(2, '0');
+
+    const del = document.createElement('button');
+    del.className = 'delete-btn';
+    del.textContent = '✕';
+    del.onclick = () => deleteRecording(i);
+
+    div.append(c, img, num, del);
+    grid.appendChild(div);
+    drawSkeletonMini(c, rec.keypoints, RECORD_COLOR);
+  });
+
+  const ct = document.getElementById('pose-count');
+  if (ct) ct.textContent = recordings.length;
+}
+
+// ── OBSERVE MODE ───────────────────────────────────────────────────────────
+function normalizePose(keypoints) {
+  const valid = keypoints.filter(k => k.score > 0.3);
+  if (valid.length < 4) return null;
+  const cx = valid.reduce((s,k) => s + k.x, 0) / valid.length;
+  const cy = valid.reduce((s,k) => s + k.y, 0) / valid.length;
+  const scale = Math.sqrt(valid.reduce((s,k) => s + (k.x-cx)**2 + (k.y-cy)**2, 0) / valid.length) || 1;
+  return keypoints.map(k => ({
+    ...k,
+    nx: k.score > 0.3 ? (k.x - cx) / scale : 0,
+    ny: k.score > 0.3 ? (k.y - cy) / scale : 0
+  }));
+}
+
+function comparePoses(a, b) {
+  if (!a || !b) return 0;
+  let total = 0, count = 0;
+  for (let i = 5; i < 17; i++) {
+    const ka = a[i], kb = b[i];
+    if (!ka || !kb || ka.score < 0.3 || kb.score < 0.3) continue;
+    const d = Math.sqrt((ka.nx - kb.nx) ** 2 + (ka.ny - kb.ny) ** 2);
+    total += d;
+    count++;
+  }
+  if (count === 0) return 0;
+  return Math.max(0, 1 - (total / count) / 1.5);
+}
+
+function matchPose(keypoints) {
+  if (recordings.length === 0) return;
+  const now = Date.now();
+  if (now - matchTimer < 800) return;
+  matchTimer = now;
+
+  const normCurrent = normalizePose(keypoints);
+  if (!normCurrent) return;
+
+  let bestScore = 0, bestIdx = -1;
+  recordings.forEach((rec, i) => {
+    const nr = normalizePose(rec.keypoints);
+    const s = comparePoses(normCurrent, nr);
+    if (s > bestScore) { bestScore = s; bestIdx = i; }
+  });
+
+  const noMatch = document.getElementById('no-match');
+  const matchImg = document.getElementById('match-img');
+  const matchScore = document.getElementById('match-score-txt');
+  const flash = document.getElementById('match-flash');
+
+  if (bestScore > 0.45 && bestIdx !== -1) {
+    const rec = recordings[bestIdx];
+
+    if (noMatch) noMatch.style.display = 'none';
+
+    if (matchImg) {
+      matchImg.src = rec.snapshot;
+      setTimeout(() => { if(matchImg) matchImg.classList.add('visible'); }, 50);
+    }
+
+    if (matchScore) {
+      matchScore.textContent = `CORRESPONDANCE ${Math.round(bestScore * 100)}% · POSTURE ${String(bestIdx+1).padStart(2,'0')}`;
+    }
+
+    if (bestIdx !== lastMatchedIdx && flash) {
+      flash.classList.remove('active');
+      void flash.offsetWidth;
+      flash.classList.add('active');
+    }
+
+    lastMatchedIdx = bestIdx;
+
+    // Draw skeleton overlay on matched photo
+    const oc = document.getElementById('match-overlay');
+    if (oc && matchImg) {
+      const doOverlay = () => {
+        oc.width = matchImg.naturalWidth || 640;
+        oc.height = matchImg.naturalHeight || 480;
+        const mc = oc.getContext('2d');
+        mc.clearRect(0, 0, oc.width, oc.height);
+
+        const kpts = rec.keypoints;
+        const valid = kpts.filter(k => k.score > 0.3);
+        if (valid.length < 3) return;
+
+        const xs = valid.map(k => k.x), ys = valid.map(k => k.y);
+        const minX = Math.min(...xs), maxX = Math.max(...xs);
+        const minY = Math.min(...ys), maxY = Math.max(...ys);
+        const rX = maxX - minX || 1, rY = maxY - minY || 1;
+        const pad = 40;
+        const toW = k => pad + (k.x - minX) / rX * (oc.width - pad * 2);
+        const toH = k => pad + (k.y - minY) / rY * (oc.height - pad * 2);
+
+        mc.strokeStyle = OBSERVE_COLOR;
+        mc.lineWidth = 2;
+        mc.globalAlpha = 0.7;
+
+        SKELETON_CONNECTIONS.forEach(([a,b]) => {
+          const ka = kpts[a], kb = kpts[b];
+          if (!ka || !kb || ka.score < 0.3 || kb.score < 0.3) return;
+          mc.beginPath();
+          mc.moveTo(toW(ka), toH(ka));
+          mc.lineTo(toW(kb), toH(kb));
+          mc.stroke();
+        });
+
+        kpts.forEach(k => {
+          if (k.score < 0.3) return;
+          mc.fillStyle = OBSERVE_COLOR;
+          mc.globalAlpha = 0.9;
+          mc.beginPath();
+          mc.arc(toW(k), toH(k), 3, 0, Math.PI * 2);
+          mc.fill();
+        });
+      };
+
+      if (matchImg.complete && matchImg.naturalWidth > 0) doOverlay();
+      else matchImg.onload = doOverlay;
+    }
+
+  } else {
+    if (noMatch) noMatch.style.display = 'flex';
+    if (matchImg) matchImg.classList.remove('visible');
+    if (matchScore) matchScore.textContent = '';
+    lastMatchedIdx = -1;
+  }
+}
+
+// ── PANEL RENDERING ────────────────────────────────────────────────────────
+function renderPanel() {
+  const panel = document.getElementById('side-panel');
+
+  if (currentMode === 'record') {
+    panel.innerHTML = `
+      <div class="section-label">CAPTURER UNE POSTURE</div>
+      <button class="btn-capture" id="capture-btn" onclick="captureCurrentPose()" disabled>
+        ▶ ENREGISTRER CETTE POSTURE
+      </button>
+      <div class="panel-section">
+        <div class="section-label">ARCHIVE · <span id="pose-count">0</span> POSTURES</div>
+        <div class="poses-grid" id="poses-grid"></div>
+        <div class="loading-msg" id="wait-msg">
+          <span class="pulse-dot" style="color:#1a1a1a"></span>
+          EN ATTENTE DE POSTURE DÉTECTÉE
+        </div>
+      </div>
+    `;
+    renderPoseGrid();
+    if (recordings.length > 0) {
+      const wm = document.getElementById('wait-msg');
+      if (wm) wm.style.display = 'none';
+    }
+
+  } else {
+    if (recordings.length === 0) {
+      panel.innerHTML = `
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:1rem;text-align:center;padding:2rem;">
+          <div style="font-size:80px;font-weight:700;color:#0f0f0f;letter-spacing:-0.03em;line-height:1">0</div>
+          <div style="font-family:'Space Mono',monospace;font-size:8px;color:#1a1a1a;letter-spacing:0.4em;line-height:2.5">
+            AUCUNE POSTURE<br>DANS L'ARCHIVE<br><br>PASSEZ EN MODE<br>ENREGISTREMENT<br>POUR COMMENCER
+          </div>
+        </div>
+      `;
+    } else {
+      panel.innerHTML = `
+        <div class="section-label">CORRESPONDANCE EN TEMPS RÉEL</div>
+        <div class="match-display" id="match-display">
+          <img id="match-img" alt="" />
+          <canvas class="match-overlay-canvas" id="match-overlay"></canvas>
+          <div class="match-flash" id="match-flash"></div>
+          <div class="match-info">
+            <div class="match-score-txt" id="match-score-txt"></div>
+          </div>
+          <div class="no-match" id="no-match">
+            PLACEZ-VOUS<br>DEVANT LA<br>CAMÉRA
+          </div>
+        </div>
+        <div class="panel-section">
+          <div class="section-label">ARCHIVE ACTIVE</div>
+          <div class="observe-count">${recordings.length}</div>
+          <div class="observe-count-label">POSTURES ENREGISTRÉES</div>
+        </div>
+      `;
+    }
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Apprends-moi — Contrôle par les mains</title>
+
+<!-- MediaPipe Hands -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500&display=swap');
+
+:root {
+  --bg: #0a0a10;
+  --surface: rgba(16,16,26,0.88);
+  --surface2: rgba(22,22,36,0.8);
+  --border: rgba(255,255,255,0.07);
+  --accent-a: #7C6FFF;
+  --accent-b: #FF6F91;
+  --accent-c: #6FFFD4;
+  --text: #f0f0f5;
+  --muted: rgba(240,240,245,0.38);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%; height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  overflow: hidden;
+}
+
+/* ── Fond réseau de neurones ── */
+#nn-bg {
+  position: fixed; inset: 0;
+  width: 100%; height: 100%;
+  z-index: 0; pointer-events: none;
+}
+
+/* ── Vidéo webcam (miroir, coin bas-droit) ── */
+#video-wrap {
+  position: fixed;
+  bottom: 20px; right: 20px;
+  width: 220px; height: 160px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 0.5px solid var(--border);
+  z-index: 50;
+  background: #000;
+}
+#input-video {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+  display: block;
+}
+#hand-overlay {
+  position: absolute; inset: 0;
+  pointer-events: none;
+}
+#cam-label {
+  position: absolute; top: 6px; left: 8px;
+  font-family: 'Space Mono', monospace;
+  font-size: 9px; color: var(--accent-c);
+  background: rgba(0,0,0,0.5);
+  padding: 2px 6px; border-radius: 4px;
+}
+
+/* ── Layout principal ── */
+#app {
+  position: relative; z-index: 10;
+  display: grid;
+  grid-template-columns: 280px 1fr 280px;
+  grid-template-rows: auto 1fr auto;
+  gap: 14px;
+  padding: 18px;
+  height: 100vh;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+header {
+  grid-column: 1 / -1;
+  display: flex; align-items: baseline; gap: 16px;
+  padding-bottom: 10px;
+  border-bottom: 0.5px solid var(--border);
+}
+header h1 {
+  font-family: 'Space Mono', monospace;
+  font-size: 15px; font-weight: 700;
+  color: var(--accent-a); letter-spacing: -0.5px;
+}
+header p { font-size: 12px; color: var(--muted); }
+
+/* ── Panneau gauche : sélection geste ── */
+.panel {
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 14px; overflow: hidden;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  display: flex; flex-direction: column;
+}
+.panel-header {
+  padding: 10px 14px;
+  border-bottom: 0.5px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.panel-title {
+  font-family: 'Space Mono', monospace;
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.panel-body { padding: 12px; flex: 1; }
+
+.gestures-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 8px; margin-bottom: 10px;
+}
+.gesture-btn {
+  background: var(--surface2);
+  border: 1.5px solid var(--border);
+  border-radius: 10px; padding: 12px 8px;
+  text-align: center; cursor: pointer;
+  transition: all 0.15s; color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  position: relative;
+}
+.gesture-btn.selected {
+  border-color: var(--accent-a);
+  background: rgba(124,111,255,0.13);
+  box-shadow: 0 0 12px rgba(124,111,255,0.18);
+}
+.gesture-btn.hovered {
+  border-color: rgba(124,111,255,0.5);
+  background: rgba(124,111,255,0.07);
+}
+.gesture-icon { font-size: 24px; margin-bottom: 5px; display: block; }
+.gesture-name { font-size: 12px; font-weight: 500; }
+.gesture-count {
+  display: inline-block; margin-top: 4px;
+  background: rgba(124,111,255,0.2); color: var(--accent-a);
+  font-size: 10px; font-family: 'Space Mono', monospace;
+  padding: 1px 6px; border-radius: 20px;
+}
+
+/* ── Centre : zone de dessin ── */
+#center-panel {
+  display: flex; flex-direction: column; gap: 10px;
+}
+#draw-wrap {
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 14px; overflow: hidden;
+  backdrop-filter: blur(14px);
+  flex: 1; position: relative;
+  display: flex; flex-direction: column;
+}
+#draw-canvas {
+  flex: 1; width: 100%;
+  cursor: crosshair; display: block;
+}
+#draw-hint {
+  position: absolute; bottom: 10px; left: 0; right: 0;
+  text-align: center;
+  font-size: 11px; color: var(--muted);
+  pointer-events: none;
+}
+
+/* ── Panneau droit : résultat ── */
+#result-area {
+  min-height: 80px;
+  background: var(--surface2);
+  border-radius: 10px; padding: 12px;
+  font-size: 13px; color: var(--muted);
+  line-height: 1.6; transition: color 0.3s;
+}
+.prediction-big {
+  font-family: 'Space Mono', monospace;
+  font-size: 20px; font-weight: 700;
+  color: var(--text); margin-bottom: 4px;
+}
+.conf-bar {
+  height: 3px; border-radius: 2px;
+  background: rgba(255,255,255,0.08); margin-top: 8px; overflow: hidden;
+}
+.conf-fill { height: 100%; border-radius: 2px; transition: width 0.4s; }
+.insight-box {
+  background: rgba(255,111,145,0.07);
+  border: 0.5px solid rgba(255,111,145,0.28);
+  border-radius: 8px; padding: 8px 10px;
+  font-size: 12px; color: rgba(255,111,145,0.9);
+  line-height: 1.6; margin-top: 8px;
+}
+
+.training-log {
+  max-height: 80px; overflow-y: auto;
+  font-family: 'Space Mono', monospace;
+  font-size: 9px; color: var(--muted); line-height: 1.8;
+  padding: 8px; background: var(--surface2);
+  border-radius: 6px; margin-top: 8px;
+}
+.log-t { color: rgba(124,111,255,0.55); }
+
+/* ── Footer stats ── */
+.stats-row {
+  grid-column: 1 / -1;
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.stat-card {
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 8px; padding: 8px 12px;
+  text-align: center;
+  backdrop-filter: blur(10px);
+}
+.stat-val {
+  font-family: 'Space Mono', monospace;
+  font-size: 18px; font-weight: 700;
+  color: var(--accent-a);
+}
+.stat-label { font-size: 10px; color: var(--muted); margin-top: 1px; }
+
+/* ── Gesture HUD (curseurs mains) ── */
+#hand-hud {
+  position: fixed; inset: 0; z-index: 20;
+  pointer-events: none;
+}
+
+/* ── Geste guide flottant ── */
+#gesture-guide {
+  position: fixed; bottom: 80px; left: 50%;
+  transform: translateX(-50%);
+  background: rgba(10,10,16,0.88);
+  border: 0.5px solid rgba(255,255,255,0.1);
+  border-radius: 24px; padding: 8px 20px;
+  font-size: 12px; color: var(--muted);
+  z-index: 30; backdrop-filter: blur(10px);
+  display: flex; gap: 18px; align-items: center;
+}
+.guide-item { display: flex; align-items: center; gap: 6px; }
+.guide-hand {
+  font-size: 14px;
+  display: inline-block;
+}
+.guide-action { font-size: 11px; color: rgba(255,255,255,0.5); }
+
+/* ── Indicateur d'action ── */
+#action-flash {
+  position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: 'Space Mono', monospace;
+  font-size: 28px; font-weight: 700;
+  color: var(--accent-c);
+  pointer-events: none; z-index: 100;
+  opacity: 0; transition: opacity 0.1s;
+  text-shadow: 0 0 30px rgba(111,255,212,0.6);
+}
+
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.45} }
+.pulsing { animation: pulse 1.2s ease-in-out infinite; }
+
+/* ── Init overlay ── */
+#init-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(10,10,16,0.96);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 20px;
+}
+#init-overlay h2 {
+  font-family: 'Space Mono', monospace;
+  font-size: 20px; color: var(--accent-a);
+}
+#init-overlay p { font-size: 14px; color: var(--muted); text-align: center; max-width: 380px; line-height: 1.7; }
+#start-cam-btn {
+  background: var(--accent-a); color: #fff;
+  border: none; border-radius: 8px;
+  padding: 12px 32px; font-size: 15px;
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 500; cursor: pointer;
+}
+#start-cam-btn:hover { opacity: 0.85; }
+.hand-schema {
+  display: flex; gap: 40px; margin: 10px 0;
+}
+.hand-box {
+  text-align: center;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 12px; padding: 16px 20px;
+}
+.hand-box .icon { font-size: 36px; margin-bottom: 8px; }
+.hand-box .label { font-size: 11px; color: var(--accent-a); font-weight: 500; margin-bottom: 4px; font-family: 'Space Mono', monospace; }
+.hand-box .desc { font-size: 12px; color: var(--muted); line-height: 1.5; }
+
+/* ── Progress cercle de validation ── */
+#progress-ring {
+  position: fixed; z-index: 25;
+  pointer-events: none;
+  opacity: 0; transition: opacity 0.2s;
+}
+</style>
+</head>
+<body>
+
+<!-- Fond NN -->
+<canvas id="nn-bg"></canvas>
+
+<!-- HUD mains -->
+<canvas id="hand-hud"></canvas>
+
+<!-- Ring de progression -->
+<svg id="progress-ring" width="80" height="80">
+  <circle cx="40" cy="40" r="34" fill="none" stroke="rgba(111,255,212,0.15)" stroke-width="3"/>
+  <circle id="ring-fill" cx="40" cy="40" r="34" fill="none"
+    stroke="#6FFFD4" stroke-width="3"
+    stroke-dasharray="213.6" stroke-dashoffset="213.6"
+    stroke-linecap="round"
+    transform="rotate(-90 40 40)"/>
+</svg>
+
+<!-- Flash d'action -->
+<div id="action-flash"></div>
+
+<!-- Vidéo webcam -->
+<div id="video-wrap">
+  <video id="input-video" autoplay muted playsinline></video>
+  <canvas id="hand-overlay"></canvas>
+  <div id="cam-label">CAM</div>
+</div>
+
+<!-- Overlay d'init -->
+<div id="init-overlay">
+  <h2>APPRENDS-MOI_</h2>
+  <div class="hand-schema">
+    <div class="hand-box">
+      <div class="icon">🤚</div>
+      <div class="label">Main gauche</div>
+      <div class="desc">Sélectionne le geste<br>à entraîner</div>
+    </div>
+    <div class="hand-box">
+      <div class="icon">✍️</div>
+      <div class="label">Main droite</div>
+      <div class="desc">Dessine dans<br>la zone centrale</div>
+    </div>
+    <div class="hand-box">
+      <div class="icon">🤜🤛</div>
+      <div class="label">Les deux mains</div>
+      <div class="desc">Rapproche les poings<br>pour valider / prédire</div>
+    </div>
+  </div>
+  <p>L'application utilise ta webcam pour détecter tes mains.<br>Aucune donnée n'est envoyée — tout est traité localement.</p>
+  <button id="start-cam-btn">Activer la caméra →</button>
+</div>
+
+<!-- App principale -->
+<div id="app">
+  <header>
+    <h1>APPRENDS-MOI_</h1>
+    <p>Entraîne une IA avec tes gestes — contrôle par les mains</p>
+  </header>
+
+  <!-- Gauche : sélection -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">01 — Sélectionne</span>
+      <span style="font-size:10px;color:var(--muted)" id="total-label">0 ex.</span>
+    </div>
+    <div class="panel-body">
+      <p style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6">
+        <span style="color:var(--accent-a)">Main gauche</span> pour choisir un geste.<br>
+        <span style="color:var(--accent-c)">Main droite</span> pour dessiner.<br>
+        <span style="color:var(--accent-b)">Mains rapprochées</span> pour valider.
+      </p>
+      <div class="gestures-grid">
+        <button class="gesture-btn selected" data-gesture="cercle" id="btn-cercle">
+          <span class="gesture-icon">○</span>
+          <div class="gesture-name">Cercle</div>
+          <span class="gesture-count" id="count-cercle">0</span>
+        </button>
+        <button class="gesture-btn" data-gesture="zigzag" id="btn-zigzag">
+          <span class="gesture-icon">〜</span>
+          <div class="gesture-name">Zigzag</div>
+          <span class="gesture-count" id="count-zigzag">0</span>
+        </button>
+        <button class="gesture-btn" data-gesture="ligne" id="btn-ligne">
+          <span class="gesture-icon">—</span>
+          <div class="gesture-name">Ligne</div>
+          <span class="gesture-count" id="count-ligne">0</span>
+        </button>
+        <button class="gesture-btn" data-gesture="croix" id="btn-croix">
+          <span class="gesture-icon">✕</span>
+          <div class="gesture-name">Croix</div>
+          <span class="gesture-count" id="count-croix">0</span>
+        </button>
+      </div>
+      <div class="training-log" id="log"></div>
+    </div>
+  </div>
+
+  <!-- Centre : dessin + résultat -->
+  <div id="center-panel">
+    <div id="draw-wrap">
+      <canvas id="draw-canvas"></canvas>
+      <div id="draw-hint">Main droite → index pointé pour dessiner</div>
+    </div>
+  </div>
+
+  <!-- Droite : résultat IA -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">02 — Résultat IA</span>
+    </div>
+    <div class="panel-body">
+      <div id="result-area">
+        <span style="font-size:12px">Entraîne l'IA puis rapproche les deux mains pour prédire !</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-row">
+    <div class="stat-card"><div class="stat-val" id="s-ex">0</div><div class="stat-label">exemples</div></div>
+    <div class="stat-card"><div class="stat-val" id="s-g">0</div><div class="stat-label">gestes</div></div>
+    <div class="stat-card"><div class="stat-val" id="s-t">0</div><div class="stat-label">prédictions</div></div>
+    <div class="stat-card"><div class="stat-val" id="s-p">—</div><div class="stat-label">précision</div></div>
+  </div>
+</div>
+
+<!-- Guide flottant -->
+<div id="gesture-guide">
+  <div class="guide-item"><span class="guide-hand">🤚</span><span class="guide-action">G : choisir geste</span></div>
+  <div class="guide-item"><span class="guide-hand">☝️</span><span class="guide-action">D : dessiner</span></div>
+  <div class="guide-item"><span class="guide-hand">🤜🤛</span><span class="guide-action">Les deux : valider</span></div>
+</div>
+
+<script>
+/* ════════════════════════════════════════════
+   RÉSEAU DE NEURONES — FOND ANIMÉ
+════════════════════════════════════════════ */
+const nnCanvas = document.getElementById('nn-bg');
+const nnCtx = nnCanvas.getContext('2d');
+let NW, NH;
+const NN_LAYERS = [8, 14, 14, 14, 8, 4];
+let nnNodes = [], nnEdges = [], nnPulses = [];
+
+function nnResize() {
+  NW = nnCanvas.width = window.innerWidth;
+  NH = nnCanvas.height = window.innerHeight;
+  buildNN();
+}
+
+function buildNN() {
+  nnNodes = []; nnEdges = []; nnPulses = [];
+  const mx = NW * 0.07, uw = NW - mx * 2, lc = NN_LAYERS.length;
+  NN_LAYERS.forEach((count, li) => {
+    const x = mx + (li / (lc - 1)) * uw;
+    const th = NH * 0.74, sy = (NH - th) / 2;
+    for (let ni = 0; ni < count; ni++) {
+      const y = count === 1 ? NH/2 : sy + (ni / (count-1)) * th;
+      nnNodes.push({ x, y, li, ni, r: 3.5 + Math.random()*2, glow: Math.random()*0.4, glowDir: Math.random()>0.5?1:-1, glowSpeed: 0.004+Math.random()*0.006, baseAlpha: 0.2+Math.random()*0.4 });
+    }
+  });
+  NN_LAYERS.forEach((_, li) => {
+    if (li >= lc-1) return;
+    const from = nnNodes.filter(n=>n.li===li), to = nnNodes.filter(n=>n.li===li+1);
+    from.forEach(f => to.forEach(t => { if (Math.random()<0.52) nnEdges.push({ from:f, to:t, w:0.1+Math.random()*0.6, alpha:0.04+Math.random()*0.09 }); }));
+  });
+  NN_LAYERS.forEach((_, li) => {
+    if (li >= lc-2) return;
+    const from = nnNodes.filter(n=>n.li===li), to = nnNodes.filter(n=>n.li===li+2);
+    from.forEach(f => { if (Math.random()<0.10) { const t=to[Math.floor(Math.random()*to.length)]; if(t) nnEdges.push({from:f,to:t,w:0.06+Math.random()*0.18,alpha:0.02+Math.random()*0.04}); } });
+  });
+}
+
+setInterval(() => {
+  if (nnPulses.length > 35) return;
+  const path=[], sp=nnNodes.filter(n=>n.li===0);
+  let cur=sp[Math.floor(Math.random()*sp.length)]; path.push(cur);
+  for (let li=1;li<NN_LAYERS.length;li++) {
+    const c=nnEdges.filter(e=>e.from===cur&&e.to.li===li).map(e=>e.to);
+    if(!c.length) break; cur=c[Math.floor(Math.random()*c.length)]; path.push(cur);
+  }
+  if (path.length>=NN_LAYERS.length-1) {
+    nnPulses.push({path,t:0,speed:0.003+Math.random()*0.005,intensity:0.35+Math.random()*0.65,col:['teal','purple','pink'][Math.floor(Math.random()*3)]});
+  }
+}, 220);
+
+function pc(col,a) {
+  if(col==='teal') return `rgba(111,255,212,${a})`;
+  if(col==='purple') return `rgba(165,148,255,${a})`;
+  return `rgba(255,120,155,${a})`;
+}
+
+const NN_LABELS=['Entrée','Couche\ncachée',null,null,'Couche\ncachée','Sortie'];
+const NN_COLORS=['rgba(111,255,212,0.55)','rgba(165,148,255,0.45)',null,null,'rgba(165,148,255,0.45)','rgba(255,120,155,0.55)'];
+
+function drawNN() {
+  nnCtx.clearRect(0,0,NW,NH);
+  nnCtx.fillStyle='#0a0a10'; nnCtx.fillRect(0,0,NW,NH);
+  const lc=NN_LAYERS.length;
+  NN_LAYERS.forEach((_,li)=>{
+    const x=NW*0.07+(li/(lc-1))*(NW*0.86);
+    const g=nnCtx.createRadialGradient(x,NH/2,0,x,NH/2,NH*0.45);
+    g.addColorStop(0,'rgba(124,111,255,0.025)'); g.addColorStop(1,'rgba(124,111,255,0)');
+    nnCtx.fillStyle=g; nnCtx.fillRect(0,0,NW,NH);
+  });
+  nnEdges.forEach(e=>{
+    nnCtx.beginPath(); nnCtx.moveTo(e.from.x,e.from.y);
+    const mx=(e.from.x+e.to.x)/2, my=(e.from.y+e.to.y)/2;
+    nnCtx.quadraticCurveTo(mx,my,e.to.x,e.to.y);
+    nnCtx.strokeStyle=`rgba(255,255,255,${e.alpha})`; nnCtx.lineWidth=e.w; nnCtx.stroke();
+  });
+  nnPulses.forEach(p=>{
+    const segs=p.path.length-1; if(segs<1) return;
+    const gt=p.t*segs, seg=Math.min(Math.floor(gt),segs-1), st=gt-seg;
+    const f=p.path[seg], t=p.path[seg+1]; if(!f||!t) return;
+    const px=f.x+(t.x-f.x)*st, py=f.y+(t.y-f.y)*st;
+    if(st<0.15) f.glow=Math.max(f.glow,p.intensity*0.95);
+    for(let i=0;i<10;i++){
+      const bt=Math.max(0,st-i*0.014), bx=f.x+(t.x-f.x)*bt, by=f.y+(t.y-f.y)*bt;
+      nnCtx.beginPath(); nnCtx.arc(bx,by,Math.max(0.1,2.5-i*0.22),0,Math.PI*2);
+      nnCtx.fillStyle=pc(p.col,p.intensity*(1-i/10)*0.6); nnCtx.fill();
+    }
+    nnCtx.beginPath(); nnCtx.arc(px,py,4,0,Math.PI*2); nnCtx.fillStyle=pc(p.col,p.intensity); nnCtx.fill();
+    const gr=nnCtx.createRadialGradient(px,py,0,px,py,18);
+    gr.addColorStop(0,pc(p.col,p.intensity*0.4)); gr.addColorStop(1,pc(p.col,0));
+    nnCtx.beginPath(); nnCtx.arc(px,py,18,0,Math.PI*2); nnCtx.fillStyle=gr; nnCtx.fill();
+    p.t+=p.speed;
+  });
+  nnPulses=nnPulses.filter(p=>p.t<1.02);
+  nnNodes.forEach(n=>{
+    n.glow+=n.glowDir*n.glowSpeed;
+    if(n.glow>0.75) n.glowDir=-1;
+    if(n.glow<0){n.glowDir=1;n.glow=0;}
+    const g=Math.max(0,n.glow);
+    if(g>0.06){
+      const gr=nnCtx.createRadialGradient(n.x,n.y,0,n.x,n.y,n.r*6);
+      gr.addColorStop(0,`rgba(165,148,255,${g*0.3})`); gr.addColorStop(1,`rgba(165,148,255,0)`);
+      nnCtx.beginPath(); nnCtx.arc(n.x,n.y,n.r*6,0,Math.PI*2); nnCtx.fillStyle=gr; nnCtx.fill();
+    }
+    nnCtx.beginPath(); nnCtx.arc(n.x,n.y,n.r,0,Math.PI*2);
+    nnCtx.fillStyle=`rgba(255,255,255,${n.baseAlpha+g*0.55})`; nnCtx.fill();
+    nnCtx.beginPath(); nnCtx.arc(n.x,n.y,n.r+2.5,0,Math.PI*2);
+    nnCtx.strokeStyle=`rgba(255,255,255,${0.04+g*0.2})`; nnCtx.lineWidth=0.5; nnCtx.stroke();
+    n.glow=Math.max(0,n.glow-0.015);
+  });
+  nnCtx.textAlign='center';
+  NN_LAYERS.forEach((count,li)=>{
+    if(!NN_LABELS[li]) return;
+    const x=NW*0.07+(li/(lc-1))*(NW*0.86);
+    const topY=nnNodes.filter(n=>n.li===li).reduce((a,b)=>a.y<b.y?a:b).y;
+    nnCtx.fillStyle=NN_COLORS[li]; nnCtx.font="500 11px 'DM Sans',sans-serif";
+    const lines=NN_LABELS[li].split('\n');
+    lines.forEach((line,i)=>nnCtx.fillText(line,x,topY-28-(lines.length-1-i)*14));
+    nnCtx.fillStyle='rgba(255,255,255,0.18)'; nnCtx.font='10px monospace';
+    nnCtx.fillText(count+' neurones',x,topY-12);
+  });
+  requestAnimationFrame(drawNN);
+}
+
+window.addEventListener('resize', nnResize);
+nnResize();
+requestAnimationFrame(drawNN);
+
+
+/* ════════════════════════════════════════════
+   CANVAS DE DESSIN
+════════════════════════════════════════════ */
+const drawCanvas = document.getElementById('draw-canvas');
+const dCtx = drawCanvas.getContext('2d');
+let drawPoints = [];
+let isDrawing = false;
+let lastIndexPos = null;
+
+function resizeDrawCanvas() {
+  const wrap = document.getElementById('draw-wrap');
+  drawCanvas.width = wrap.clientWidth;
+  drawCanvas.height = wrap.clientHeight - 30;
+  clearDrawCanvas();
+}
+
+function clearDrawCanvas() {
+  dCtx.fillStyle = 'rgba(12,12,20,0.0)';
+  dCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+  dCtx.fillStyle = 'rgba(12,12,20,0.85)';
+  dCtx.fillRect(0, 0, drawCanvas.width, drawCanvas.height);
+  drawPoints = [];
+  isDrawing = false;
+  lastIndexPos = null;
+}
+
+function drawStroke(x, y) {
+  if (!isDrawing) {
+    dCtx.beginPath();
+    dCtx.moveTo(x, y);
+    isDrawing = true;
+  } else {
+    dCtx.lineTo(x, y);
+    dCtx.strokeStyle = '#6FFFD4';
+    dCtx.lineWidth = 3;
+    dCtx.lineCap = 'round';
+    dCtx.lineJoin = 'round';
+    dCtx.stroke();
+  }
+  drawPoints.push({ x, y });
+}
+
+
+/* ════════════════════════════════════════════
+   LOGIQUE IA
+════════════════════════════════════════════ */
+let selectedGesture = 'cercle';
+let examples = { cercle: [], zigzag: [], ligne: [], croix: [] };
+let totalExamples = 0, totalTests = 0, correctTests = 0;
+let isPredicting = false;
+
+function selectGesture(name) {
+  selectedGesture = name;
+  document.querySelectorAll('.gesture-btn').forEach(b => {
+    b.classList.toggle('selected', b.dataset.gesture === name);
+  });
+}
+
+function addLog(msg, color='var(--muted)') {
+  const log = document.getElementById('log');
+  const t = new Date().toLocaleTimeString('fr',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const el = document.createElement('div');
+  el.innerHTML = `<span class="log-t">${t}</span> <span style="color:${color}">${msg}</span>`;
+  log.appendChild(el); log.scrollTop = log.scrollHeight;
+}
+
+function extractFeatures(pts) {
+  if (pts.length < 4) return null;
+  const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y);
+  const w=Math.max(...xs)-Math.min(...xs)||1, h=Math.max(...ys)-Math.min(...ys)||1;
+  const ratio=w/h;
+  let dirChanges=0;
+  for(let i=2;i<pts.length;i++){
+    const dx1=pts[i-1].x-pts[i-2].x,dy1=pts[i-1].y-pts[i-2].y;
+    const dx2=pts[i].x-pts[i-1].x,dy2=pts[i].y-pts[i-1].y;
+    if(Math.abs(dx1*dy2-dy1*dx2)>20 && dx1*dx2+dy1*dy2<0) dirChanges++;
+  }
+  let totalLen=0;
+  for(let i=1;i<pts.length;i++) totalLen+=Math.hypot(pts[i].x-pts[i-1].x,pts[i].y-pts[i-1].y);
+  const startEnd=Math.hypot(pts[0].x-pts[pts.length-1].x,pts[0].y-pts[pts.length-1].y);
+  const closedness=1-startEnd/(totalLen||1);
+  return {ratio:ratio.toFixed(2),dirChanges,closedness:closedness.toFixed(2),totalLen:Math.round(totalLen),points:pts.length};
+}
+
+function addExample() {
+  if (drawPoints.length < 5) { addLog('Dessine un geste !','var(--accent-b)'); return; }
+  const features = extractFeatures(drawPoints); if (!features) return;
+  examples[selectedGesture].push({ features });
+  totalExamples++;
+  document.getElementById('count-'+selectedGesture).textContent = examples[selectedGesture].length;
+  document.getElementById('total-label').textContent = totalExamples+' ex.';
+  addLog(`+ "${selectedGesture}" r=${features.ratio} c=${features.dirChanges}`,'var(--accent-c)');
+  for(let i=0;i<5;i++) setTimeout(()=>triggerLearningPulse(),i*100);
+  updateStats();
+  clearDrawCanvas();
+  flashAction('✓ Ajouté !');
+}
+
+function triggerLearningPulse() {
+  const sp=nnNodes.filter(n=>n.li===0);
+  let cur=sp[Math.floor(Math.random()*sp.length)];
+  const path=[cur];
+  for(let li=1;li<NN_LAYERS.length;li++){
+    const c=nnEdges.filter(e=>e.from===cur&&e.to.li===li).map(e=>e.to);
+    if(!c.length) break; cur=c[Math.floor(Math.random()*c.length)]; path.push(cur);
+  }
+  if(path.length>=3) nnPulses.push({path,t:0,speed:0.009+Math.random()*0.007,intensity:0.9,col:'teal'});
+}
+
+function updateStats() {
+  document.getElementById('s-ex').textContent = totalExamples;
+  document.getElementById('s-g').textContent = Object.values(examples).filter(v=>v.length>0).length;
+  document.getElementById('s-t').textContent = totalTests;
+  document.getElementById('s-p').textContent = totalTests>0 ? Math.round(correctTests/totalTests*100)+'%' : '—';
+}
+
+async function predict() {
+  if (isPredicting) return;
+  if (drawPoints.length < 5) { flashAction('Dessine d\'abord !'); return; }
+  if (!Object.values(examples).some(v=>v.length>0)) { flashAction('Entraîne d\'abord !'); return; }
+  isPredicting = true;
+  const features = extractFeatures(drawPoints);
+  const resultEl = document.getElementById('result-area');
+  resultEl.className = 'pulsing'; resultEl.style.color = 'var(--accent-a)';
+  resultEl.innerHTML = 'Analyse en cours...';
+
+  const td = Object.entries(examples).filter(([,v])=>v.length>0)
+    .map(([g,exs])=>`Geste "${g}" (${exs.length} ex.): ${exs.slice(-3).map(e=>`ratio=${e.features.ratio},courbes=${e.features.dirChanges},fermeture=${e.features.closedness}`).join(' | ')}`).join('\n');
+
+  const prompt = `Tu es un classifieur de gestes pour une exposition sur l'IA.
+ENTRAÎNEMENT :
+${td}
+NOUVEAU GESTE : ratio=${features.ratio}, courbes=${features.dirChanges}, fermeture=${features.closedness}, longueur=${features.totalLen}px
+Réponds UNIQUEMENT en JSON valide sans markdown :
+{"prediction":"[nom]","confiance":75,"raison":"[1 phrase enfant]","biais":"[1 phrase sur erreur possible]","correct":true}`;
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1000,messages:[{role:'user',content:prompt}]})
+    });
+    const data = await resp.json();
+    const text = data.content.map(c=>c.text||'').join('');
+    const result = JSON.parse(text.replace(/```json|```/g,'').trim());
+    totalTests++;
+    if(result.correct!==false && result.confiance>=50) correctTests++;
+    const cc = result.confiance>=70?'var(--accent-c)':result.confiance>=40?'#FAC775':'var(--accent-b)';
+    resultEl.className=''; resultEl.style.color='';
+    resultEl.innerHTML = `<div class="prediction-big">${result.prediction}</div><div style="font-size:12px;color:var(--muted)">Confiance : <span style="color:${cc}">${result.confiance}%</span></div><div class="conf-bar"><div class="conf-fill" style="width:${result.confiance}%;background:${cc}"></div></div><div style="font-size:12px;color:var(--muted);margin-top:8px;line-height:1.5">${result.raison}</div><div class="insight-box">Biais : ${result.biais}</div>`;
+    addLog(`→ "${result.prediction}" (${result.confiance}%)`, cc);
+    for(let i=0;i<8;i++) setTimeout(()=>triggerLearningPulse(),i*70);
+    updateStats();
+    flashAction(result.prediction+' !');
+  } catch(e) {
+    resultEl.className=''; resultEl.style.color='var(--accent-b)';
+    resultEl.innerHTML='Erreur de connexion à l\'IA.';
+  }
+  isPredicting = false;
+}
+
+
+/* ════════════════════════════════════════════
+   FLASH D'ACTION
+════════════════════════════════════════════ */
+function flashAction(msg) {
+  const el = document.getElementById('action-flash');
+  el.textContent = msg; el.style.opacity = '1';
+  setTimeout(()=>{ el.style.opacity='0'; }, 1200);
+}
+
+
+/* ════════════════════════════════════════════
+   MEDIAPIPE HANDS
+════════════════════════════════════════════ */
+const hudCanvas = document.getElementById('hand-hud');
+const hudCtx = hudCanvas.getContext('2d');
+const miniCanvas = document.getElementById('hand-overlay');
+const miniCtx = miniCanvas.getContext('2d');
+
+function resizeHUD() {
+  hudCanvas.width = window.innerWidth;
+  hudCanvas.height = window.innerHeight;
+  miniCanvas.width = 220; miniCanvas.height = 160;
+}
+
+// État des mains
+let leftHand = null, rightHand = null;
+let leftPinch = false, rightIndexDown = false;
+let bothHandsClose = false;
+let pinchProgress = 0;
+let pinchHoldTimer = 0;
+const PINCH_HOLD_FRAMES = 30; // ~1 seconde à 30fps
+
+// Hover sur les boutons gestes
+let hoveredGesture = null;
+let hoverFrames = 0;
+const HOVER_SELECT_FRAMES = 45; // ~1.5s de survol pour sélectionner
+
+const GESTURE_NAMES = ['cercle','zigzag','ligne','croix'];
+
+function getLandmark(hand, idx) {
+  if (!hand || !hand.landmarks) return null;
+  return hand.landmarks[idx];
+}
+
+function screenX(lm) { return (1 - lm.x) * window.innerWidth; } // miroir
+function screenY(lm) { return lm.y * window.innerHeight; }
+function miniX(lm)  { return (1 - lm.x) * 220; }
+function miniY(lm)  { return lm.y * 160; }
+
+function dist2D(a, b) {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+// Détecte poing fermé
+function isFist(hand) {
+  if (!hand) return false;
+  const lms = hand.landmarks;
+  let foldedCount = 0;
+  [[8,5],[12,9],[16,13],[20,17]].forEach(([tip,base])=>{
+    if(lms[tip].y > lms[base].y) foldedCount++;
+  });
+  return foldedCount >= 3;
+}
+
+// Détecte index pointé (seul doigt levé)
+function isIndexPointing(hand) {
+  if (!hand) return false;
+  const lms = hand.landmarks;
+  const indexUp = lms[8].y < lms[6].y;
+  const middleDown = lms[12].y > lms[10].y;
+  const ringDown = lms[16].y > lms[14].y;
+  const pinkyDown = lms[20].y > lms[18].y;
+  return indexUp && middleDown && ringDown && pinkyDown;
+}
+
+// Détecte paume ouverte
+function isOpenPalm(hand) {
+  if (!hand) return false;
+  const lms = hand.landmarks;
+  let openCount = 0;
+  [[8,6],[12,10],[16,14],[20,18]].forEach(([tip,pip])=>{
+    if(lms[tip].y < lms[pip].y) openCount++;
+  });
+  return openCount >= 3;
+}
+
+function getIndexTip(hand) {
+  if (!hand) return null;
+  return hand.landmarks[8];
+}
+
+function getWrist(hand) {
+  if (!hand) return null;
+  return hand.landmarks[0];
+}
+
+// Identifie quelle zone de geste la main gauche survole
+function getHoveredGestureZone(lm) {
+  const el = document.elementFromPoint(screenX(lm), screenY(lm));
+  if (!el) return null;
+  const btn = el.closest('.gesture-btn');
+  if (!btn) return null;
+  return btn.dataset.gesture || null;
+}
+
+function onResults(results) {
+  // Reset
+  leftHand = null; rightHand = null;
+
+  if (results.multiHandedness && results.multiHandLandmarks) {
+    results.multiHandedness.forEach((hand, i) => {
+      // MediaPipe inverse gauche/droite à cause du miroir
+      if (hand.label === 'Right') leftHand = { landmarks: results.multiHandLandmarks[i], score: hand.score };
+      else rightHand = { landmarks: results.multiHandLandmarks[i], score: hand.score };
+    });
+  }
+
+  processHands();
+  renderHUD();
+  renderMini(results);
+}
+
+function processHands() {
+  const drawRect = drawCanvas.getBoundingClientRect();
+
+  // ── Main droite : dessin avec index pointé ──
+  if (rightHand && isIndexPointing(rightHand)) {
+    const tip = getIndexTip(rightHand);
+    const sx = screenX(tip), sy = screenY(tip);
+    // Convertir en coords canvas de dessin
+    const dx = ((sx - drawRect.left) / drawRect.width) * drawCanvas.width;
+    const dy = ((sy - drawRect.top) / drawRect.height) * drawCanvas.height;
+    if (dx >= 0 && dx <= drawCanvas.width && dy >= 0 && dy <= drawCanvas.height) {
+      drawStroke(dx, dy);
+      document.getElementById('draw-hint').style.opacity = '0';
+    } else {
+      isDrawing = false; dCtx.beginPath();
+    }
+    lastIndexPos = { x: sx, y: sy };
+  } else {
+    // Index non pointé = interruption du tracé
+    if (isDrawing) { isDrawing = false; dCtx.beginPath(); }
+    lastIndexPos = null;
+  }
+
+  // ── Main gauche : navigation gestes avec paume ouverte ──
+  if (leftHand && isOpenPalm(leftHand)) {
+    const tip = getIndexTip(leftHand);
+    const newHovered = getHoveredGestureZone(tip);
+    if (newHovered) {
+      document.querySelectorAll('.gesture-btn').forEach(b => b.classList.remove('hovered'));
+      document.getElementById('btn-'+newHovered)?.classList.add('hovered');
+      if (newHovered === hoveredGesture) {
+        hoverFrames++;
+        // Mise à jour du ring de sélection
+        updateProgressRing(screenX(tip), screenY(tip), hoverFrames / HOVER_SELECT_FRAMES);
+        if (hoverFrames >= HOVER_SELECT_FRAMES) {
+          selectGesture(newHovered);
+          hoverFrames = 0;
+          flashAction('Geste : '+newHovered);
+          hideProgressRing();
+        }
+      } else {
+        hoveredGesture = newHovered;
+        hoverFrames = 0;
+        hideProgressRing();
+      }
+    } else {
+      hoveredGesture = null; hoverFrames = 0;
+      document.querySelectorAll('.gesture-btn').forEach(b => b.classList.remove('hovered'));
+      hideProgressRing();
+    }
+  } else {
+    hoveredGesture = null; hoverFrames = 0;
+    document.querySelectorAll('.gesture-btn').forEach(b => b.classList.remove('hovered'));
+    hideProgressRing();
+  }
+
+  // ── Deux mains rapprochées (poings) : valider ──
+  if (leftHand && rightHand) {
+    const lw = getWrist(leftHand), rw = getWrist(rightHand);
+    if (lw && rw) {
+      const d = dist2D(lw, rw);
+      if (isFist(leftHand) && isFist(rightHand) && d < 0.35) {
+        pinchProgress = Math.min(1, pinchProgress + 1/PINCH_HOLD_FRAMES);
+        const cx = (screenX(lw) + screenX(rw)) / 2;
+        const cy = (screenY(lw) + screenY(rw)) / 2;
+        updateProgressRing(cx, cy, pinchProgress);
+        if (pinchProgress >= 1) {
+          pinchProgress = 0;
+          // Décide : si exemples dans la zone, ajouter ; sinon prédire
+          const hasExamples = Object.values(examples).some(v=>v.length>0);
+          if (drawPoints.length >= 5 && !hasExamples) {
+            addExample();
+          } else if (drawPoints.length >= 5 && hasExamples) {
+            // Si pas d'exemples pour ce geste, ajouter ; sinon prédire
+            if (examples[selectedGesture].length < 3) {
+              addExample();
+            } else {
+              predict();
+            }
+          }
+          hideProgressRing();
+        }
+      } else {
+        pinchProgress = Math.max(0, pinchProgress - 0.05);
+        if (pinchProgress <= 0) hideProgressRing();
+        else {
+          const cx = (screenX(lw) + screenX(rw)) / 2;
+          const cy = (screenY(lw) + screenY(rw)) / 2;
+          updateProgressRing(cx, cy, pinchProgress);
+        }
+      }
+    }
+  } else {
+    pinchProgress = Math.max(0, pinchProgress - 0.05);
+    if (pinchProgress <= 0) hideProgressRing();
+  }
+}
+
+// ── Progress ring ──
+const ring = document.getElementById('progress-ring');
+const ringFill = document.getElementById('ring-fill');
+const CIRCUMFERENCE = 2 * Math.PI * 34;
+
+function updateProgressRing(x, y, progress) {
+  ring.style.left = (x - 40)+'px';
+  ring.style.top  = (y - 40)+'px';
+  ring.style.opacity = '1';
+  ringFill.style.strokeDashoffset = CIRCUMFERENCE * (1 - progress);
+}
+
+function hideProgressRing() { ring.style.opacity = '0'; }
+
+// ── Rendu HUD principal ──
+function renderHUD() {
+  hudCtx.clearRect(0, 0, hudCanvas.width, hudCanvas.height);
+
+  // Curseur main droite (index)
+  if (rightHand) {
+    const tip = getIndexTip(rightHand);
+    const sx = screenX(tip), sy = screenY(tip);
+    const pointing = isIndexPointing(rightHand);
+
+    // Halo
+    const grad = hudCtx.createRadialGradient(sx,sy,0,sx,sy,pointing?20:12);
+    grad.addColorStop(0, pointing?'rgba(111,255,212,0.35)':'rgba(111,255,212,0.1)');
+    grad.addColorStop(1,'rgba(111,255,212,0)');
+    hudCtx.beginPath(); hudCtx.arc(sx,sy,pointing?20:12,0,Math.PI*2);
+    hudCtx.fillStyle=grad; hudCtx.fill();
+
+    // Point
+    hudCtx.beginPath(); hudCtx.arc(sx,sy,pointing?5:3,0,Math.PI*2);
+    hudCtx.fillStyle=pointing?'#6FFFD4':'rgba(111,255,212,0.4)'; hudCtx.fill();
+
+    // Label
+    if (pointing) {
+      hudCtx.font="500 11px 'DM Sans',sans-serif";
+      hudCtx.fillStyle='rgba(111,255,212,0.7)';
+      hudCtx.textAlign='left';
+      hudCtx.fillText('✍ dessine',sx+12,sy-8);
+    }
+  }
+
+  // Curseur main gauche (index pour navigation)
+  if (leftHand && isOpenPalm(leftHand)) {
+    const tip = getIndexTip(leftHand);
+    const sx = screenX(tip), sy = screenY(tip);
+
+    const grad = hudCtx.createRadialGradient(sx,sy,0,sx,sy,16);
+    grad.addColorStop(0,'rgba(124,111,255,0.3)');
+    grad.addColorStop(1,'rgba(124,111,255,0)');
+    hudCtx.beginPath(); hudCtx.arc(sx,sy,16,0,Math.PI*2);
+    hudCtx.fillStyle=grad; hudCtx.fill();
+
+    hudCtx.beginPath(); hudCtx.arc(sx,sy,4,0,Math.PI*2);
+    hudCtx.fillStyle='#7C6FFF'; hudCtx.fill();
+
+    if (hoveredGesture) {
+      hudCtx.font="500 11px 'DM Sans',sans-serif";
+      hudCtx.fillStyle='rgba(124,111,255,0.8)';
+      hudCtx.textAlign='left';
+      const pct=Math.round(hoverFrames/HOVER_SELECT_FRAMES*100);
+      hudCtx.fillText(`⏳ ${hoveredGesture} ${pct}%`,sx+12,sy-8);
+    }
+  }
+
+  // Lignes entre les deux poings si rapprochés
+  if (leftHand && rightHand && isFist(leftHand) && isFist(rightHand)) {
+    const lw = getWrist(leftHand), rw = getWrist(rightHand);
+    if (lw && rw) {
+      const d = dist2D(lw,rw);
+      if (d < 0.4) {
+        const lx=screenX(lw),ly=screenY(lw),rx=screenX(rw),ry=screenY(rw);
+        hudCtx.beginPath(); hudCtx.moveTo(lx,ly); hudCtx.lineTo(rx,ry);
+        hudCtx.strokeStyle=`rgba(255,120,155,${(0.4-d)*3})`;
+        hudCtx.lineWidth=2; hudCtx.setLineDash([4,4]); hudCtx.stroke();
+        hudCtx.setLineDash([]);
+        const mx=(lx+rx)/2, my=(ly+ry)/2;
+        hudCtx.font="500 12px 'DM Sans',sans-serif";
+        hudCtx.fillStyle='rgba(255,120,155,0.9)';
+        hudCtx.textAlign='center';
+        hudCtx.fillText(examples[selectedGesture].length<3?'🤜🤛 Valider':'🤜🤛 Prédire',mx,my-14);
+      }
+    }
+  }
+}
+
+// ── Mini overlay sur la vignette webcam ──
+function renderMini(results) {
+  miniCtx.clearRect(0,0,220,160);
+  if (!results.multiHandLandmarks) return;
+
+  const CONNECTIONS = [
+    [0,1],[1,2],[2,3],[3,4],
+    [0,5],[5,6],[6,7],[7,8],
+    [9,10],[10,11],[11,12],
+    [13,14],[14,15],[15,16],
+    [17,18],[18,19],[19,20],
+    [0,17],[5,9],[9,13],[13,17]
+  ];
+
+  results.multiHandLandmarks.forEach((lms, hi) => {
+    const label = results.multiHandedness[hi].label;
+    const col = label==='Right' ? 'rgba(124,111,255,0.7)' : 'rgba(111,255,212,0.7)';
+
+    CONNECTIONS.forEach(([a,b])=>{
+      miniCtx.beginPath();
+      miniCtx.moveTo(miniX(lms[a]),miniY(lms[a]));
+      miniCtx.lineTo(miniX(lms[b]),miniY(lms[b]));
+      miniCtx.strokeStyle=col; miniCtx.lineWidth=1.5; miniCtx.stroke();
+    });
+
+    lms.forEach((lm,i)=>{
+      miniCtx.beginPath(); miniCtx.arc(miniX(lm),miniY(lm),[4,8,12,16,20].includes(i)?3:2,0,Math.PI*2);
+      miniCtx.fillStyle=[4,8,12,16,20].includes(i)?'white':col; miniCtx.fill();
+    });
+  });
+}
+
+
+/* ════════════════════════════════════════════
+   INITIALISATION CAMÉRA
+════════════════════════════════════════════ */
+document.getElementById('start-cam-btn').addEventListener('click', async () => {
+  document.getElementById('init-overlay').style.display = 'none';
+
+  const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.6
+  });
+  hands.onResults(onResults);
+
+  const video = document.getElementById('input-video');
+  const camera = new Camera(video, {
+    onFrame: async () => { await hands.send({ image: video }); },
+    width: 220, height: 160
+  });
+  camera.start();
+
+  resizeHUD();
+  resizeDrawCanvas();
+  window.addEventListener('resize', ()=>{ resizeHUD(); resizeDrawCanvas(); });
+});
+
+// Init taille dessin sans caméra
+window.addEventListener('load', ()=>{ resizeDrawCanvas(); resizeHUD(); });
+</script>
+</body>
+</html>

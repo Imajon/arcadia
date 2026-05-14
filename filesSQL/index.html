@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>App Gallery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600;1,9..144,300&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0d0d0d;
+    --surface:  #141414;
+    --surface2: #1a1a1a;
+    --border:   #222;
+    --border2:  #2a2a2a;
+    --text:     #e8e4dc;
+    --muted:    #555;
+    --dim:      #333;
+    --green:    #1D9E75;
+    --amber:    #EF9F27;
+    --red:      #E24B4A;
+    --teal:     #9fe1cb;
+  }
+
+  body {
+    font-family: 'DM Mono', monospace;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* ── HEADER ── */
+  .header {
+    border-bottom: 1px solid var(--border2);
+    padding: 2rem 2.5rem 1.5rem;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  .header h1 {
+    font-family: 'Fraunces', serif;
+    font-size: 2.2rem;
+    font-weight: 300;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    line-height: 1;
+  }
+  .header p { font-size: 11px; color: var(--muted); margin-top: 6px; text-transform: uppercase; letter-spacing: 0.12em; }
+  .header-right { display: flex; gap: 10px; align-items: center; }
+
+  .badge { font-size: 10px; color: var(--muted); border: 1px solid var(--border2); padding: 2px 12px; border-radius: 20px; letter-spacing: 0.06em; }
+
+  .btn-primary {
+    background: var(--text); color: var(--bg);
+    border: none; padding: 10px 20px;
+    font-family: 'DM Mono', monospace; font-size: 12px;
+    cursor: pointer; border-radius: 2px;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    transition: background 0.15s, transform 0.1s;
+    white-space: nowrap;
+  }
+  .btn-primary:hover { background: #fff; transform: translateY(-1px); }
+
+  /* ── TOOLBAR ── */
+  .toolbar {
+    padding: 0.7rem 2.5rem;
+    border-bottom: 1px solid #1a1a1a;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .mini-btn {
+    font-family: 'DM Mono', monospace; font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    background: none; border: 1px solid var(--border2);
+    color: var(--muted); padding: 5px 14px;
+    cursor: pointer; border-radius: 2px;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+  }
+  .mini-btn:hover { color: var(--text); border-color: var(--muted); }
+  .mini-btn.green { border-color: var(--green); color: var(--green); }
+  .mini-btn.green:hover { background: var(--green); color: var(--bg); }
+
+  /* ── STATUS DOT ── */
+  .status { display: flex; align-items: center; gap: 8px; font-size: 10px; color: var(--dim); margin-left: auto; text-transform: uppercase; letter-spacing: 0.06em; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); transition: background 0.3s; flex-shrink: 0; }
+  .dot.ok { background: var(--green); }
+  .dot.err { background: var(--red); }
+  .dot.loading { background: var(--amber); animation: blink 0.7s infinite alternate; }
+  @keyframes blink { from { opacity: 1; } to { opacity: 0.3; } }
+
+  /* ── SEARCH ── */
+  .searchbar { padding: 0 2.5rem; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #1a1a1a; }
+  .searchbar svg { color: var(--dim); flex-shrink: 0; }
+  .searchbar input {
+    flex: 1; background: transparent; border: none;
+    color: var(--text); font-family: 'DM Mono', monospace;
+    font-size: 12px; padding: 0.85rem 0; outline: none;
+  }
+  .searchbar input::placeholder { color: var(--dim); }
+
+  /* ── GALLERY ── */
+  .gallery {
+    padding: 2rem 2.5rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+    gap: 1.5rem;
+  }
+
+  .empty {
+    padding: 5rem 2.5rem;
+    text-align: center;
+    display: flex; flex-direction: column; align-items: center; gap: 1rem;
+    color: var(--dim);
+  }
+  .empty span { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; }
+  .empty p { font-size: 12px; color: var(--border2); max-width: 280px; line-height: 1.6; }
+
+  /* ── CARD ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    transition: border-color 0.2s, transform 0.2s;
+    animation: fadein 0.3s ease both;
+  }
+  .card:hover { border-color: #444; transform: translateY(-2px); }
+  @keyframes fadein { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+  .thumb { position: relative; width: 100%; height: 165px; background: #111; overflow: hidden; cursor: pointer; }
+  .thumb iframe { width: 200%; height: 200%; transform: scale(0.5); transform-origin: top left; border: none; pointer-events: none; }
+  .thumb-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0); transition: background 0.2s; }
+  .thumb:hover .thumb-overlay { background: rgba(0,0,0,0.55); }
+  .open-link { opacity: 0; font-family: 'DM Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: #fff; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.25); padding: 8px 18px; border-radius: 2px; text-decoration: none; transition: opacity 0.2s; }
+  .thumb:hover .open-link { opacity: 1; }
+  .thumb-msg { position: absolute; inset: 0; background: #111; display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.08em; transition: opacity 0.5s; }
+  .thumb-msg.gone { opacity: 0; pointer-events: none; }
+  .thumb-nope { flex-direction: column; gap: 8px; }
+
+  .card-body { padding: 1rem 1.1rem; flex: 1; display: flex; flex-direction: column; gap: 5px; }
+  .card-name { font-family: 'Fraunces', serif; font-size: 1.1rem; font-weight: 300; color: var(--text); }
+  .card-url { font-size: 10px; color: #444; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card-desc { font-size: 11px; color: #666; line-height: 1.5; flex: 1; }
+  .tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+  .tag { font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em; padding: 2px 8px; border: 1px solid var(--border2); border-radius: 1px; color: var(--muted); cursor: pointer; transition: color 0.15s, border-color 0.15s; }
+  .tag:hover { color: var(--text); border-color: var(--muted); }
+
+  .card-foot { padding: 0.6rem 1.1rem; border-top: 1px solid #1e1e1e; display: flex; gap: 8px; align-items: center; }
+  .action { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--muted); background: none; border: none; cursor: pointer; padding: 3px 0; text-transform: uppercase; letter-spacing: 0.08em; transition: color 0.15s; }
+  .action:hover { color: var(--text); }
+  .action.del:hover { color: var(--red); }
+  .sep { color: var(--border2); font-size: 10px; }
+
+  /* ── MODAL ── */
+  .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.88); z-index: 200; align-items: center; justify-content: center; padding: 2rem; }
+  .overlay.open { display: flex; }
+
+  .modal { background: var(--surface); border: 1px solid var(--border2); border-radius: 4px; width: 100%; max-width: 480px; padding: 2rem; animation: popIn 0.2s ease; }
+  .modal.wide { max-width: 560px; }
+  @keyframes popIn { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+
+  .modal h2 { font-family: 'Fraunces', serif; font-size: 1.4rem; font-weight: 300; color: var(--text); margin-bottom: 1.5rem; }
+
+  .field { margin-bottom: 1.2rem; }
+  .field label { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin-bottom: 6px; }
+  .field input, .field textarea {
+    width: 100%; background: var(--bg); border: 1px solid var(--border2);
+    color: var(--text); font-family: 'DM Mono', monospace; font-size: 12px;
+    padding: 10px 12px; border-radius: 2px; outline: none; transition: border-color 0.15s;
+  }
+  .field input:focus, .field textarea:focus { border-color: var(--muted); }
+  .field textarea { resize: vertical; min-height: 70px; }
+
+  .modal-foot { display: flex; gap: 10px; justify-content: flex-end; margin-top: 1.5rem; }
+  .btn-cancel { font-family: 'DM Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; background: none; border: 1px solid var(--border2); color: var(--muted); padding: 9px 18px; cursor: pointer; border-radius: 2px; transition: color 0.15s, border-color 0.15s; }
+  .btn-cancel:hover { color: var(--text); border-color: var(--muted); }
+  .btn-save { font-family: 'DM Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; background: var(--text); border: none; color: var(--bg); padding: 9px 22px; cursor: pointer; border-radius: 2px; transition: background 0.15s; }
+  .btn-save:hover { background: #fff; }
+
+  /* Import zone */
+  .drop-zone { border: 1px dashed var(--border2); border-radius: 4px; padding: 1.5rem; text-align: center; cursor: pointer; transition: border-color 0.2s; margin-bottom: 1rem; }
+  .drop-zone:hover { border-color: var(--muted); }
+  .drop-zone p { font-size: 11px; color: var(--muted); line-height: 1.7; }
+  .drop-zone strong { color: #777; }
+  .import-ta { width: 100%; background: var(--bg); border: 1px solid var(--border2); color: var(--teal); font-family: 'DM Mono', monospace; font-size: 11px; padding: 12px; border-radius: 2px; outline: none; resize: vertical; min-height: 160px; line-height: 1.6; }
+  .import-note { font-size: 10px; color: var(--dim); margin-top: 8px; line-height: 1.5; }
+
+  /* Toast */
+  .toast {
+    position: fixed; bottom: 2rem; right: 2rem;
+    background: var(--surface2); border: 1px solid var(--border2);
+    color: var(--text); font-size: 12px; padding: 10px 18px;
+    border-radius: 3px; z-index: 999;
+    transform: translateY(10px); opacity: 0;
+    transition: transform 0.2s, opacity 0.2s;
+    pointer-events: none;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.ok { border-left: 3px solid var(--green); }
+  .toast.fail { border-left: 3px solid var(--red); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>App Gallery</h1>
+    <p>Collection d'applications HTML · MySQL</p>
+  </div>
+  <div class="header-right">
+    <span class="badge" id="badge">— apps</span>
+    <button class="btn-primary" onclick="openEdit()">+ Ajouter</button>
+  </div>
+</div>
+
+<div class="toolbar">
+  <button class="mini-btn green" onclick="exportApps()">↓ Exporter JSON</button>
+  <button class="mini-btn" onclick="openImport()">↑ Importer JSON</button>
+  <input type="file" id="file-in" accept=".json" style="display:none" onchange="handleFile(event)">
+  <div class="status">
+    <div class="dot loading" id="dot"></div>
+    <span id="status-txt">Connexion…</span>
+  </div>
+</div>
+
+<div class="searchbar">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+  <input type="text" id="search" placeholder="Rechercher par nom, description, tag…" oninput="onSearch()">
+</div>
+
+<div id="root"></div>
+
+<!-- Modal édition -->
+<div class="overlay" id="ov-edit" onclick="closeOv(event,'ov-edit')">
+  <div class="modal">
+    <h2 id="edit-title">Nouvelle app</h2>
+    <div class="field"><label>Nom *</label><input id="f-name" placeholder="Ex: COSMOS"></div>
+    <div class="field"><label>URL *</label><input id="f-url" placeholder="https://…"></div>
+    <div class="field"><label>Description</label><textarea id="f-desc" placeholder="Brève description…"></textarea></div>
+    <div class="field"><label>Tags (séparés par virgules)</label><input id="f-tags" placeholder="webcam, jeu, MediaPipe…"></div>
+    <div class="modal-foot">
+      <button class="btn-cancel" onclick="closeModal('ov-edit')">Annuler</button>
+      <button class="btn-save" onclick="saveApp()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal import -->
+<div class="overlay" id="ov-import" onclick="closeOv(event,'ov-import')">
+  <div class="modal wide">
+    <h2>Importer JSON</h2>
+    <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-in').click()">
+      <p><strong>Cliquer pour choisir un fichier</strong><br>ou glisser-déposer un <code>gallery.json</code> ici</p>
+    </div>
+    <p style="font-size:11px;color:#444;text-align:center;margin:0.5rem 0">— ou coller le JSON —</p>
+    <textarea class="import-ta" id="import-ta" placeholder='[{"id":"…","name":"…","url":"…"}]'></textarea>
+    <p class="import-note">Les apps déjà présentes en base (même id) ne seront pas dupliquées.</p>
+    <div class="modal-foot">
+      <button class="btn-cancel" onclick="closeModal('ov-import')">Annuler</button>
+      <button class="btn-save" onclick="doImport()">Fusionner</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = 'api.php';
+let apps = [];
+let editId = null;
+let searchTimer = null;
+
+// ── API helpers ─────────────────────────────────────────
+async function apiFetch(url, opts = {}) {
+  const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Erreur serveur');
+  return data;
+}
+
+// ── Load ────────────────────────────────────────────────
+async function load(q = '') {
+  setStatus('loading', 'Chargement…');
+  try {
+    const url = q ? `${API}?q=${encodeURIComponent(q)}` : API;
+    apps = await apiFetch(url);
+    setStatus('ok', 'Connecté · MySQL');
+    render();
+  } catch(e) {
+    setStatus('err', 'Erreur de connexion');
+    document.getElementById('root').innerHTML = `
+      <div class="empty">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#222" stroke-width="1"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span>Connexion impossible</span>
+        <p>Vérifiez que config.php est correctement configuré et que install.php a été exécuté.<br><br><em>${e.message}</em></p>
+      </div>`;
+  }
+}
+
+// ── Render ──────────────────────────────────────────────
+function render() {
+  document.getElementById('badge').textContent = apps.length + ' app' + (apps.length > 1 ? 's' : '');
+  const root = document.getElementById('root');
+
+  if (apps.length === 0) {
+    root.className = '';
+    root.innerHTML = `<div class="empty">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#222" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+      <span>Galerie vide</span>
+      <p>Cliquez sur « + Ajouter » pour référencer votre première app HTML.</p>
+    </div>`;
+    return;
+  }
+
+  root.className = 'gallery';
+  root.innerHTML = apps.map(app => {
+    const sid  = 'ldr_' + app.id;
+    const tags = (app.tags || []).map(t =>
+      `<span class="tag" onclick="filterTag('${t}')">${t}</span>`
+    ).join('');
+    const shortUrl = (app.url || '').replace(/^https?:\/\//, '').slice(0, 46) + (app.url.length > 50 ? '…' : '');
+    return `<div class="card">
+      <div class="thumb" onclick="window.open('${app.url}','_blank')">
+        <div class="thumb-msg" id="${sid}">Chargement…</div>
+        <iframe src="${app.url}" sandbox="allow-scripts allow-same-origin" scrolling="no"
+          onload="document.getElementById('${sid}').classList.add('gone')"
+          onerror="noThumb('${sid}')"
+          title="Aperçu ${app.name}"></iframe>
+        <div class="thumb-overlay">
+          <a class="open-link" href="${app.url}" target="_blank" onclick="event.stopPropagation()">Ouvrir →</a>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="card-name">${app.name}</div>
+        <div class="card-url">${shortUrl}</div>
+        ${app.description ? `<div class="card-desc">${app.description}</div>` : ''}
+        ${tags ? `<div class="tags">${tags}</div>` : ''}
+      </div>
+      <div class="card-foot">
+        <button class="action" onclick="window.open('${app.url}','_blank')">Ouvrir</button>
+        <span class="sep">·</span>
+        <button class="action" onclick="openEdit('${app.id}')">Modifier</button>
+        <span class="sep">·</span>
+        <button class="action del" onclick="deleteApp('${app.id}')">Supprimer</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function noThumb(sid) {
+  const el = document.getElementById(sid);
+  if (!el) return;
+  el.classList.add('thumb-nope');
+  el.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2a2a2a" stroke-width="1"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><span>Aperçu indisponible</span>`;
+}
+
+// ── Edit modal ──────────────────────────────────────────
+function openEdit(id) {
+  editId = id || null;
+  if (id) {
+    const a = apps.find(x => x.id === id);
+    document.getElementById('edit-title').textContent = "Modifier l'app";
+    document.getElementById('f-name').value = a.name;
+    document.getElementById('f-url').value  = a.url;
+    document.getElementById('f-desc').value = a.description || '';
+    document.getElementById('f-tags').value = (a.tags || []).join(', ');
+  } else {
+    document.getElementById('edit-title').textContent = 'Nouvelle app';
+    ['f-name','f-url','f-desc','f-tags'].forEach(i => document.getElementById(i).value = '');
+  }
+  document.getElementById('ov-edit').classList.add('open');
+  setTimeout(() => document.getElementById('f-name').focus(), 100);
+}
+
+async function saveApp() {
+  const name = document.getElementById('f-name').value.trim();
+  const url  = document.getElementById('f-url').value.trim();
+  if (!name || !url) { toast('Nom et URL requis.', 'fail'); return; }
+  const payload = {
+    name,
+    url,
+    description: document.getElementById('f-desc').value.trim(),
+    tags: document.getElementById('f-tags').value.split(',').map(t => t.trim()).filter(Boolean)
+  };
+  try {
+    if (editId) {
+      await apiFetch(`${API}?id=${editId}`, { method: 'PUT', body: JSON.stringify(payload) });
+      toast('App modifiée ✓', 'ok');
+    } else {
+      await apiFetch(API, { method: 'POST', body: JSON.stringify(payload) });
+      toast('App ajoutée ✓', 'ok');
+    }
+    closeModal('ov-edit');
+    load();
+  } catch(e) { toast(e.message, 'fail'); }
+}
+
+async function deleteApp(id) {
+  if (!confirm('Supprimer cette app ?')) return;
+  try {
+    await apiFetch(`${API}?id=${id}`, { method: 'DELETE' });
+    toast('App supprimée', 'ok');
+    load();
+  } catch(e) { toast(e.message, 'fail'); }
+}
+
+// ── Import / Export ─────────────────────────────────────
+async function exportApps() {
+  try {
+    const data = await apiFetch(`${API}?export=1`);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'gallery.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch(e) { toast(e.message, 'fail'); }
+}
+
+function openImport() {
+  document.getElementById('import-ta').value = '';
+  document.getElementById('ov-import').classList.add('open');
+}
+
+function handleFile(e) {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = ev => { document.getElementById('import-ta').value = ev.target.result; };
+  r.readAsText(f); e.target.value = '';
+}
+
+async function doImport() {
+  try {
+    const raw = document.getElementById('import-ta').value.trim();
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) throw new Error('Tableau JSON attendu');
+    const res = await apiFetch(`${API}?import=1`, { method: 'POST', body: JSON.stringify(arr) });
+    closeModal('ov-import');
+    toast(`${res.inserted} app(s) importée(s) ✓`, 'ok');
+    load();
+  } catch(e) { toast('JSON invalide : ' + e.message, 'fail'); }
+}
+
+// ── Search ──────────────────────────────────────────────
+function onSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => load(document.getElementById('search').value), 350);
+}
+
+function filterTag(tag) {
+  document.getElementById('search').value = tag;
+  load(tag);
+}
+
+// ── Modal helpers ────────────────────────────────────────
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function closeOv(e, id) { if (e.target === document.getElementById(id)) closeModal(id); }
+
+// ── Status ───────────────────────────────────────────────
+function setStatus(state, txt) {
+  const dot = document.getElementById('dot');
+  dot.className = 'dot ' + (state === 'ok' ? 'ok' : state === 'err' ? 'err' : 'loading');
+  document.getElementById('status-txt').textContent = txt;
+}
+
+// ── Toast ────────────────────────────────────────────────
+let toastTimer;
+function toast(msg, type = 'ok') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `toast ${type} show`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+// ── Drag & drop import ───────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const dz = document.getElementById('drop-zone');
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.style.borderColor = '#555'; });
+  dz.addEventListener('dragleave', () => { dz.style.borderColor = ''; });
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); dz.style.borderColor = '';
+    const f = e.dataTransfer.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = ev => { document.getElementById('import-ta').value = ev.target.result; };
+    r.readAsText(f);
+  });
+});
+
+load();
+</script>
+</body>
+</html>

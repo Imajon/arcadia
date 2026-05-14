@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CORPUS MIROR</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@300;400;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{width:100%;height:100%;background:#000;color:#e8e8e0;font-family:'Syne',sans-serif;overflow:hidden;cursor:none;}
+
+/* ── CURSOR ── */
+#cursor{
+  position:fixed;width:16px;height:16px;pointer-events:none;
+  border-radius:50%;border:2px solid rgba(255,255,255,0.45);
+  transform:translate(-50%,-50%);z-index:9999;
+  transition:border-color 0.12s,transform 0.07s,width 0.15s,height 0.15s;
+}
+#cursor.active{border-color:rgba(255,255,255,0.9);transform:translate(-50%,-50%) scale(1.8);}
+
+/* ── SPLASH ── */
+#splash{
+  position:fixed;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;background:#000;z-index:200;gap:3rem;
+}
+.spl-eye{font-family:'Space Mono',monospace;font-size:clamp(10px,1vw,12px);letter-spacing:0.45em;color:#2a2a2a;}
+.spl-logo{font-size:clamp(52px,8vw,96px);font-weight:800;color:#e8e8e0;letter-spacing:-0.03em;text-align:center;line-height:0.92;}
+.spl-sub{font-size:clamp(13px,1.4vw,15px);color:#777;letter-spacing:0.1em;text-align:center;max-width:420px;line-height:1.9;font-family:'Space Mono',monospace;}
+.spl-auto{font-family:'Space Mono',monospace;font-size:clamp(10px,1.1vw,12px);letter-spacing:0.35em;color:#333;display:flex;gap:10px;align-items:center;}
+.spl-ct{font-size:clamp(20px,2.5vw,26px);font-weight:700;color:#444;letter-spacing:-0.02em;}
+
+.mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:2px;width:min(600px,88vw);}
+.mode-card{background:#080808;padding:3rem 2.5rem;cursor:none;position:relative;overflow:hidden;user-select:none;transition:background 0.2s;}
+.mode-card:hover{background:#0f0f0f;}
+.mc-num{font-family:'Space Mono',monospace;font-size:10px;letter-spacing:0.4em;color:#2a2a2a;display:block;margin-bottom:1.2rem;}
+.mc-lbl{font-size:clamp(20px,2.4vw,26px);font-weight:700;display:block;margin-bottom:0.6rem;letter-spacing:0.02em;}
+.mc-desc{font-size:clamp(11px,1.1vw,13px);color:#3a3a3a;line-height:1.7;letter-spacing:0.04em;font-family:'Space Mono',monospace;}
+.mc-fill{position:absolute;bottom:0;left:0;height:3px;width:0%;}
+.mode-card[data-mode="record"] .mc-fill{background:#c8a96e;}
+.mode-card[data-mode="observe"] .mc-fill{background:#6ea8c8;}
+
+/* ── APP ── */
+#app{display:none;position:fixed;inset:0;}
+#app.on{display:block;}
+
+/* ── OBSERVE VIEW ── */
+#obs-view{position:absolute;inset:0;display:none;}
+#obs-view.on{display:block;}
+#obs-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:0;}
+#obs-canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);}
+
+/* Match layer */
+#match-layer{position:absolute;inset:0;z-index:4;}
+#match-photo{
+  position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+  opacity:0;transition:opacity 0.2s ease;
+}
+#match-photo.vis{opacity:0.78;}
+#match-skel-canvas{position:absolute;inset:0;width:100%;height:100%;mix-blend-mode:screen;z-index:2;pointer-events:none;}
+
+/* No match message */
+#no-match-msg{
+  position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:2rem;
+  z-index:3;pointer-events:none;
+}
+.nm-main{
+  font-family:'Space Mono',monospace;font-size:clamp(13px,1.6vw,18px);
+  letter-spacing:0.35em;color:#fff;
+  text-shadow:0 1px 8px rgba(0,0,0,0.9),0 0 24px rgba(0,0,0,0.7);
+  text-align:center;line-height:2.5;
+}
+/* MOSAIC INVITE — always visible over match photo too */
+#mosaic-invite{
+  position:absolute;bottom:0;left:0;right:0;z-index:15;
+  display:flex;flex-direction:column;align-items:center;
+  padding:2.5rem 2rem;
+  background:linear-gradient(transparent, rgba(0,0,0,0.75) 60%);
+  pointer-events:none;
+  gap:1rem;
+}
+.mosaic-text{
+  font-family:'Space Mono',monospace;
+  font-size:clamp(12px,1.4vw,16px);
+  letter-spacing:0.4em;
+  color:rgba(255,255,255,0.55);
+  text-align:center;
+  text-transform:uppercase;
+}
+.mosaic-cta{
+  font-family:'Syne',sans-serif;
+  font-size:clamp(16px,2vw,22px);
+  font-weight:700;
+  letter-spacing:0.12em;
+  color:#fff;
+  text-shadow:0 1px 6px rgba(0,0,0,0.8);
+  text-align:center;
+}
+
+/* GESTURE ZONE — top strip, visible with label */
+#gz-zone{
+  position:absolute;top:0;left:0;right:0;
+  height:30vh;z-index:12;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:flex-end;
+  padding-bottom:1.5rem;
+  /* subtle top vignette */
+  background:linear-gradient(rgba(200,169,110,0.04),transparent);
+  pointer-events:none;
+}
+.gz-instruction{
+  font-family:'Space Mono',monospace;
+  font-size:clamp(12px,1.4vw,15px);
+  letter-spacing:0.4em;color:#fff;
+  text-shadow:0 1px 6px rgba(0,0,0,0.95),0 0 20px rgba(0,0,0,0.6);
+  text-align:center;line-height:2;
+  transition:color 0.3s,text-shadow 0.3s;
+}
+.gz-instruction.lit{
+  color:#c8a96e;
+  text-shadow:0 0 30px rgba(200,169,110,0.6),0 1px 6px rgba(0,0,0,0.95);
+}
+.gz-progress-wrap{
+  width:180px;height:3px;background:rgba(255,255,255,0.08);margin-top:1rem;border-radius:2px;overflow:hidden;
+}
+.gz-progress-bar{height:100%;background:#c8a96e;width:0%;transition:none;border-radius:2px;}
+
+/* RECORD BUTTON — always available, bottom right in obs mode */
+#btn-record{
+  position:absolute;right:2rem;bottom:8rem;z-index:20;
+  pointer-events:all;cursor:pointer;
+  background:rgba(0,0,0,0.6);
+  border:2px solid rgba(200,169,110,0.4);
+  border-radius:4px;
+  padding:1rem 2rem;
+  font-family:'Space Mono',monospace;
+  font-size:clamp(11px,1.2vw,13px);
+  letter-spacing:0.35em;
+  color:#c8a96e;
+  transition:all 0.2s;
+  backdrop-filter:blur(6px);
+  display:flex;flex-direction:column;align-items:center;gap:6px;
+}
+#btn-record:hover{background:rgba(200,169,110,0.12);border-color:rgba(200,169,110,0.7);}
+#btn-record .btn-fill{
+  position:absolute;bottom:0;left:0;height:2px;background:#c8a96e;width:0%;border-radius:0 0 2px 2px;
+}
+#btn-record .btn-icon{font-size:clamp(20px,2.5vw,28px);line-height:1;}
+
+/* Match info panel */
+#match-panel{
+  position:absolute;top:0;left:0;right:0;z-index:14;
+  background:linear-gradient(rgba(0,0,0,0.7) 70%,transparent);
+  padding:5rem 2rem 3rem;
+  pointer-events:none;
+  opacity:0;transition:opacity 0.3s;
+}
+#match-panel.vis{opacity:1;}
+.mp-score{
+  font-family:'Space Mono',monospace;font-size:clamp(11px,1.3vw,14px);
+  letter-spacing:0.35em;color:#6ea8c8;
+  text-shadow:0 1px 4px rgba(0,0,0,0.8);
+  display:block;margin-bottom:0.4rem;
+}
+.mp-ts{
+  font-family:'Space Mono',monospace;font-size:clamp(10px,1.1vw,12px);
+  letter-spacing:0.35em;color:rgba(255,255,255,0.45);
+  text-shadow:0 1px 4px rgba(0,0,0,0.8);
+  display:block;
+}
+
+#obs-flash,#rec-flash{position:absolute;inset:0;opacity:0;pointer-events:none;z-index:30;}
+#obs-flash{background:#6ea8c8;}
+#rec-flash{background:#c8a96e;}
+
+/* ── RECORD VIEW ── */
+#rec-view{position:absolute;inset:0;display:none;background:#000;}
+#rec-view.on{display:block;}
+#rec-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:0.32;}
+#rec-canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);}
+
+/* Countdown */
+#cd-wrap{
+  position:absolute;inset:0;display:none;
+  align-items:center;justify-content:center;flex-direction:column;gap:2rem;z-index:10;
+}
+#cd-wrap.on{display:flex;}
+.cd-ring-wrap{position:relative;width:160px;height:160px;}
+.cd-n{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  font-size:64px;font-weight:800;color:#c8a96e;font-family:'Syne',sans-serif;letter-spacing:-0.04em;
+  text-shadow:0 2px 12px rgba(0,0,0,0.8);
+}
+.cd-info{display:flex;flex-direction:column;align-items:center;gap:0.6rem;}
+.cd-lbl{
+  font-family:'Space Mono',monospace;font-size:clamp(12px,1.3vw,14px);
+  letter-spacing:0.4em;color:#c8a96e;
+  text-shadow:0 1px 6px rgba(0,0,0,0.8);
+  animation:blink 1.2s ease infinite;
+}
+@keyframes blink{0%,100%{opacity:0.25}50%{opacity:1}}
+.cd-cap-count{
+  font-family:'Space Mono',monospace;font-size:clamp(12px,1.3vw,15px);
+  letter-spacing:0.3em;color:#fff;
+  text-shadow:0 1px 6px rgba(0,0,0,0.9);
+}
+
+/* ── HUD ── */
+.hud{position:absolute;z-index:20;pointer-events:none;}
+.hud.tl{top:1.6rem;left:1.6rem;}
+.hud.tr{top:1.6rem;right:1.6rem;display:flex;align-items:center;gap:10px;pointer-events:all;}
+.hud.bl{bottom:1.6rem;left:1.6rem;}
+.hud.br{bottom:1.6rem;right:1.6rem;text-align:right;}
+.hud-pill{
+  background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);
+  border:1px solid rgba(255,255,255,0.07);border-radius:4px;
+  padding:6px 14px;display:inline-flex;align-items:center;gap:8px;
+}
+.h-logo{font-family:'Space Mono',monospace;font-size:clamp(9px,1vw,11px);letter-spacing:0.45em;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,0.9);}
+.h-badge{
+  font-family:'Space Mono',monospace;font-size:clamp(10px,1.1vw,12px);
+  letter-spacing:0.35em;padding:6px 16px;border:1px solid;border-radius:3px;
+  background:rgba(0,0,0,0.5);backdrop-filter:blur(6px);
+}
+.h-badge.obs{color:#6ea8c8;border-color:rgba(110,168,200,0.3);}
+.h-badge.rec{color:#c8a96e;border-color:rgba(200,169,110,0.3);}
+.h-stat{font-family:'Space Mono',monospace;font-size:clamp(11px,1.2vw,13px);letter-spacing:0.3em;color:#fff;text-shadow:0 1px 6px rgba(0,0,0,0.95);}
+.h-count{font-family:'Space Mono',monospace;font-size:clamp(10px,1.1vw,12px);letter-spacing:0.3em;color:#fff;text-shadow:0 1px 6px rgba(0,0,0,0.95);text-align:right;}
+.h-count span{font-size:clamp(28px,3.5vw,40px);font-weight:800;color:#fff;letter-spacing:-0.03em;display:block;line-height:1;text-shadow:0 1px 8px rgba(0,0,0,0.9);}
+.fs-btn{
+  font-family:'Space Mono',monospace;font-size:clamp(10px,1.1vw,12px);letter-spacing:0.2em;
+  padding:7px 16px;background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.15);
+  color:#fff;cursor:pointer;transition:all 0.2s;pointer-events:all;
+  backdrop-filter:blur(4px);border-radius:3px;
+}
+.fs-btn:hover{background:rgba(0,0,0,0.75);border-color:rgba(255,255,255,0.35);}
+
+/* Corners */
+.cf{position:absolute;inset:0;pointer-events:none;z-index:6;}
+.cf div{position:absolute;width:22px;height:22px;border-style:solid;border-color:rgba(255,255,255,0.07);}
+.cf .tl{top:14px;left:14px;border-width:1px 0 0 1px;}
+.cf .tr{top:14px;right:14px;border-width:1px 1px 0 0;}
+.cf .bl{bottom:14px;left:14px;border-width:0 0 1px 1px;}
+.cf .br{bottom:14px;right:14px;border-width:0 1px 1px 0;}
+
+/* Scan */
+.scan{position:absolute;left:0;right:0;height:1px;z-index:8;pointer-events:none;
+  background:linear-gradient(90deg,transparent,rgba(110,168,200,0.06),rgba(110,168,200,0.3),rgba(110,168,200,0.06),transparent);
+  animation:scan 8s ease-in-out infinite;}
+@keyframes scan{0%{top:0%}100%{top:100%}}
+
+/* Toast */
+#toast{
+  position:fixed;bottom:2.5rem;left:50%;transform:translateX(-50%) translateY(12px);
+  background:rgba(0,0,0,0.88);border:1px solid rgba(255,255,255,0.1);border-radius:3px;
+  padding:0.8rem 2rem;font-family:'Space Mono',monospace;font-size:clamp(11px,1.2vw,13px);
+  letter-spacing:0.25em;color:#c8a96e;opacity:0;transition:all 0.3s;
+  pointer-events:none;z-index:9998;white-space:nowrap;backdrop-filter:blur(8px);
+}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0);}
+</style>
+</head>
+<body>
+
+<div id="cursor"></div>
+
+<!-- ── SPLASH ── -->
+<div id="splash">
+  <div class="spl-eye">Studio EYA · Dispositif</div>
+  <div class="spl-logo">CORPUS<br>MIROR</div>
+  <div class="spl-sub">Maintenez la main sur une zone pour sélectionner — aucun clic requis</div>
+  <div class="mode-grid">
+    <div class="mode-card" data-mode="record" onclick="pickMode('record')">
+      <span class="mc-num">01</span>
+      <span class="mc-lbl">Enregistrement</span>
+      <span class="mc-desc">Bougez pendant 10s — toutes vos postures sont capturées</span>
+      <div class="mc-fill" id="fb-record"></div>
+    </div>
+    <div class="mode-card" data-mode="observe" onclick="pickMode('observe')">
+      <span class="mc-num">02</span>
+      <span class="mc-lbl">Observation</span>
+      <span class="mc-desc">Votre corps trouve en temps réel son reflet dans les autres</span>
+      <div class="mc-fill" id="fb-observe"></div>
+    </div>
+  </div>
+  <div class="spl-auto">
+    <span>MODE OBSERVATION DANS</span>
+    <span class="spl-ct" id="auto-ct">5</span>
+    <span>S</span>
+  </div>
+</div>
+
+<!-- ── APP ── -->
+<div id="app">
+
+  <!-- OBSERVE -->
+  <div id="obs-view">
+    <video id="obs-video" autoplay playsinline muted></video>
+    <canvas id="obs-canvas"></canvas>
+    <div class="scan"></div>
+
+    <!-- Matched photo + skeleton -->
+    <div id="match-layer">
+      <img id="match-photo" alt=""/>
+      <canvas id="match-skel-canvas"></canvas>
+      <div id="no-match-msg">
+        <div class="nm-main">PLACEZ-VOUS<br>DEVANT LA CAMÉRA</div>
+      </div>
+    </div>
+
+    <!-- Match info panel (top) -->
+    <div id="match-panel">
+      <span class="mp-score" id="mp-score"></span>
+      <span class="mp-ts" id="mp-ts"></span>
+    </div>
+
+    <!-- Gesture zone (top) -->
+    <div id="gz-zone">
+      <div class="gz-instruction" id="gz-lbl">↑ &nbsp; LEVER LA MAIN AU-DESSUS DE LA TÊTE POUR S'ENREGISTRER &nbsp; ↑</div>
+      <div class="gz-progress-wrap"><div class="gz-progress-bar" id="gz-bar"></div></div>
+    </div>
+
+    <!-- Mosaic invite (bottom) -->
+    <div id="mosaic-invite">
+      <div class="mosaic-text">Faites partie de la mosaïque</div>
+      <div class="mosaic-cta">Enregistrez-vous pour rejoindre le miroir collectif</div>
+    </div>
+
+    <!-- Record button fallback -->
+    <div id="btn-record" onclick="enterRecord()">
+      <div class="btn-icon">⏺</div>
+      <div>S'ENREGISTRER</div>
+      <div class="btn-fill" id="btn-record-fill"></div>
+    </div>
+
+    <div id="obs-flash"></div>
+    <div class="cf"><div class="tl"></div><div class="tr"></div><div class="bl"></div><div class="br"></div></div>
+    <div class="hud tl"><div class="hud-pill"><div class="h-logo">CORPUS MIROR</div></div></div>
+    <div class="hud tr">
+      <div class="h-badge obs">MODE OBSERVATION</div>
+      <button class="fs-btn" onclick="toggleFS()">⛶ PLEIN ÉCRAN</button>
+    </div>
+    <div class="hud br">
+      <div class="h-count"><span id="obs-ct">0</span>POSTURES ARCHIVÉES</div>
+    </div>
+  </div>
+
+  <!-- RECORD -->
+  <div id="rec-view">
+    <video id="rec-video" autoplay playsinline muted></video>
+    <canvas id="rec-canvas"></canvas>
+    <div class="scan"></div>
+    <div id="rec-flash"></div>
+    <div id="cd-wrap">
+      <div class="cd-ring-wrap">
+        <svg viewBox="0 0 160 160" style="width:160px;height:160px">
+          <circle cx="80" cy="80" r="70" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="2"/>
+          <circle id="cd-ring" cx="80" cy="80" r="70" fill="none"
+            stroke="#c8a96e" stroke-width="2"
+            stroke-dasharray="439.8" stroke-dashoffset="0"
+            transform="rotate(-90 80 80)"
+            style="transition:stroke-dashoffset 1s linear;filter:drop-shadow(0 0 6px rgba(200,169,110,0.4))"/>
+        </svg>
+        <div class="cd-n" id="cd-n">10</div>
+      </div>
+      <div class="cd-info">
+        <div class="cd-lbl">BOUGEZ — TOUTES VOS POSTURES SONT CAPTURÉES</div>
+        <div class="cd-cap-count" id="cd-cap-count">0 POSTURE CAPTURÉE</div>
+      </div>
+    </div>
+    <div class="cf"><div class="tl"></div><div class="tr"></div><div class="bl"></div><div class="br"></div></div>
+    <div class="hud tl"><div class="hud-pill"><div class="h-logo">CORPUS MIROR</div></div></div>
+    <div class="hud tr">
+      <div class="h-badge rec">MODE ENREGISTREMENT</div>
+      <button class="fs-btn" onclick="toggleFS()">⛶ PLEIN ÉCRAN</button>
+    </div>
+    <div class="hud bl"><div class="h-stat" id="rec-stat">EN ATTENTE DE POSTURE…</div></div>
+  </div>
+
+</div>
+<div id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
+<script>
+'use strict';
+
+// ── CONFIG ───────────────────────────────────────────────────────────────────
+const CONF_MIN      = 0.40;   // detection confidence threshold
+const GESTURE_MS    = 1800;   // ms to hold hand raised
+const BTN_HOVER_MS  = 1500;   // ms to hover button with hand
+const RECORD_SECS   = 10;
+const CAPTURE_EVERY = 350;    // ms between pose captures during recording
+const MIN_POSE_DIST = 0.08;   // min movement between saved poses
+const CIRC          = 439.8;  // 2π×70
+const MATCH_MIN     = 0.28;
+const CHANGE_DELTA  = 0.09;
+
+const SKEL=[
+  [5,6],[5,7],[7,9],[6,8],[8,10],
+  [5,11],[6,12],[11,12],
+  [11,13],[13,15],[12,14],[14,16]
+];
+
+// ── STATE ────────────────────────────────────────────────────────────────────
+let detector=null,stream=null;
+let modelReady=false,camReady=false;
+let mode=null; // 'observe'|'record'
+let recordings=[];       // {keypoints, snapshot, timestamp}
+let currentPose=null;
+
+// Observe
+let currentMatchIdx=-1,lastSwitchNorm=null;
+
+// Record session
+let cdTimer=null,captureTimer=null,cdSec=0,sessionCaptures=0,lastCapturedNorm=null;
+
+// Gesture (raise hand)
+let gzPct=0;
+
+// Button hover gesture
+let btnHoverPct=0,btnHoverActive=false;
+
+// Splash
+let splashTimer=null,splashSec=5;
+let splashGestMode=null,splashGestPct=0,splashGestIv=null;
+
+// Cursor
+let curX=window.innerWidth/2,curY=window.innerHeight/2;
+
+// ── UTILS ────────────────────────────────────────────────────────────────────
+const $=id=>document.getElementById(id);
+const toast=(msg,d=2800)=>{
+  const t=$('toast');t.textContent=msg;t.classList.add('on');
+  setTimeout(()=>t.classList.remove('on'),d);
+};
+const toggleFS=()=>{
+  document.fullscreenElement
+    ?document.exitFullscreen().catch(()=>{})
+    :document.documentElement.requestFullscreen().catch(()=>{});
+};
+document.addEventListener('keydown',e=>{if(e.key==='f'||e.key==='F')toggleFS();});
+
+function fmtDate(ts){
+  const d=new Date(ts);
+  const pad=n=>String(n).padStart(2,'0');
+  return `${pad(d.getDate())} / ${pad(d.getMonth()+1)} / ${d.getFullYear()}  ·  ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+// ── CURSOR ───────────────────────────────────────────────────────────────────
+document.addEventListener('mousemove',e=>{curX=e.clientX;curY=e.clientY;syncCur();});
+function syncCur(){const c=$('cursor');if(!c)return;c.style.left=curX+'px';c.style.top=curY+'px';}
+function setCurHand(hx,hy,vw,vh){curX=(1-hx/vw)*window.innerWidth;curY=(hy/vh)*window.innerHeight;syncCur();}
+
+// ── SPLASH AUTO ──────────────────────────────────────────────────────────────
+function startSplashAuto(){
+  splashSec=5;$('auto-ct').textContent=splashSec;
+  splashTimer=setInterval(()=>{
+    splashSec--;$('auto-ct').textContent=splashSec;
+    if(splashSec<=0){clearInterval(splashTimer);launchApp('observe');}
+  },1000);
+}
+function pickMode(m){clearInterval(splashTimer);launchApp(m);}
+
+// ── SPLASH GESTURE ───────────────────────────────────────────────────────────
+function splashGestCheck(){
+  if(!currentPose){splashGestCancel();return;}
+  const kpts=currentPose.keypoints;
+  const hp=bestHand(kpts);
+  if(!hp){splashGestCancel();return;}
+  setCurHand(hp.x,hp.y,getVW(),getVH());
+  $('cursor').classList.add('active');
+  const grid=$('mode-grid');if(!grid)return;
+  const r=grid.getBoundingClientRect();
+  const mid=r.left+r.width/2;
+  let hov=null;
+  if(curX>=r.left&&curX<=r.right&&curY>=r.top&&curY<=r.bottom)
+    hov=curX<mid?'record':'observe';
+  if(hov!==splashGestMode){splashGestCancel();splashGestMode=hov;if(hov)splashGestStart(hov);}
+}
+function splashGestStart(m){
+  splashGestPct=0;clearInterval(splashGestIv);
+  splashGestIv=setInterval(()=>{
+    splashGestPct+=50/GESTURE_MS*100;
+    const f=$('fb-'+m);if(f)f.style.width=Math.min(splashGestPct,100)+'%';
+    if(splashGestPct>=100){clearInterval(splashGestIv);clearInterval(splashTimer);launchApp(m);}
+  },50);
+}
+function splashGestCancel(){
+  clearInterval(splashGestIv);splashGestPct=0;splashGestMode=null;
+  ['record','observe'].forEach(m=>{const f=$('fb-'+m);if(f)f.style.width='0%';});
+  $('cursor').classList.remove('active');
+}
+
+// ── LAUNCH ───────────────────────────────────────────────────────────────────
+async function launchApp(m){
+  $('splash').style.display='none';
+  $('app').classList.add('on');
+  if(!camReady)await initCam();
+  if(!modelReady)await new Promise(r=>{const iv=setInterval(()=>{if(modelReady){clearInterval(iv);r();}},80);});
+  setMode(m);
+}
+
+function enterRecord(){setMode('record');}
+
+function setMode(m){
+  mode=m;
+  if(m==='observe'){
+    stopRecordSession();
+    $('rec-view').classList.remove('on');
+    $('obs-view').classList.add('on');
+    $('obs-ct').textContent=recordings.length;
+    currentMatchIdx=-1;lastSwitchNorm=null;
+    resetMatchUI();
+  }else{
+    $('obs-view').classList.remove('on');
+    $('rec-view').classList.add('on');
+    startRecordSession();
+  }
+}
+
+// ── CAMERA ───────────────────────────────────────────────────────────────────
+function getVW(){const v=$('obs-video');return v.videoWidth||640;}
+function getVH(){const v=$('obs-video');return v.videoHeight||480;}
+
+async function initCam(){
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{width:{ideal:1280},height:{ideal:720},facingMode:'user'},audio:false
+    });
+    [$('obs-video'),$('rec-video')].forEach(v=>{
+      if(v){v.srcObject=stream;v.play().catch(()=>{});}
+    });
+    await new Promise(r=>{const v=$('obs-video');if(v.readyState>=2)r();else v.onloadedmetadata=r;});
+    camReady=true;
+  }catch(e){toast('Accès caméra refusé');}
+}
+
+// ── MODEL ────────────────────────────────────────────────────────────────────
+async function initModel(){
+  try{
+    await tf.setBackend('webgl');
+    detector=await poseDetection.createDetector(
+      poseDetection.SupportedModels.MoveNet,
+      {modelType:poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING}
+    );
+    modelReady=true;
+    runLoop();
+  }catch(e){toast('Erreur TensorFlow');console.error(e);}
+}
+
+// ── MAIN LOOP ────────────────────────────────────────────────────────────────
+function runLoop(){
+  const obsV=$('obs-video'),obsC=$('obs-canvas');
+  const recV=$('rec-video'),recC=$('rec-canvas');
+
+  async function frame(){
+    const v=mode==='record'?recV:obsV;
+    const c=mode==='record'?recC:obsC;
+    if(v&&v.readyState>=2){
+      c.width=v.videoWidth;c.height=v.videoHeight;
+      const ctx=c.getContext('2d');
+      ctx.clearRect(0,0,c.width,c.height);
+      let poses=[];
+      try{poses=await detector.estimatePoses(v);}catch(_){}
+      if(poses.length>0&&(poses[0].score||0)>=CONF_MIN){
+        currentPose=poses[0];
+        drawSkel(ctx,currentPose.keypoints,mode==='record'?'#c8a96e':'#6ea8c8');
+        const hp=bestHand(currentPose.keypoints);
+        if(hp){setCurHand(hp.x,hp.y,c.width,c.height);$('cursor').classList.add('active');}
+        else $('cursor').classList.remove('active');
+        if(mode==='observe'){
+          updateMatch(currentPose.keypoints);
+          checkRaiseGesture(currentPose.keypoints,c.width,c.height);
+          checkBtnHover(currentPose.keypoints,c.width,c.height);
+        }
+        if(mode==='record'){
+          $('rec-stat').textContent='POSTURE DÉTECTÉE — BOUGEZ LIBREMENT';
+        }
+      }else{
+        currentPose=null;
+        $('cursor').classList.remove('active');
+        if(mode==='observe'){raiseGestReset();btnHoverReset();noMatchUI();}
+        if(mode==='record')$('rec-stat').textContent='EN ATTENTE DE POSTURE…';
+      }
+    }
+    if(!mode){if(currentPose)splashGestCheck();else splashGestCancel();}
+    requestAnimationFrame(frame);
+  }
+  frame();
+}
+
+// ── HAND ─────────────────────────────────────────────────────────────────────
+function bestHand(kpts){
+  const c=[kpts[16],kpts[15],kpts[10],kpts[9]];
+  let b=null;
+  c.forEach(k=>{if(k&&k.score>=0.3&&(!b||k.score>b.score))b=k;});
+  return b;
+}
+
+// ── SKELETON ─────────────────────────────────────────────────────────────────
+function drawSkel(ctx,kpts,color){
+  ctx.strokeStyle=color;ctx.lineWidth=2.5;ctx.globalAlpha=0.9;
+  ctx.shadowColor=color;ctx.shadowBlur=5;
+  SKEL.forEach(([a,b])=>{
+    const ka=kpts[a],kb=kpts[b];
+    if(!ka||!kb||ka.score<CONF_MIN||kb.score<CONF_MIN)return;
+    ctx.beginPath();ctx.moveTo(ka.x,ka.y);ctx.lineTo(kb.x,kb.y);ctx.stroke();
+  });
+  ctx.shadowBlur=0;
+  kpts.forEach(k=>{
+    if(k.score<CONF_MIN)return;
+    ctx.fillStyle=color;ctx.globalAlpha=1;
+    ctx.beginPath();ctx.arc(k.x,k.y,4,0,Math.PI*2);ctx.fill();
+  });
+  ctx.globalAlpha=1;
+}
+
+function drawSkelOnCanvas(canvas,kpts,color){
+  if(!canvas)return;
+  const valid=kpts.filter(k=>k.score>=CONF_MIN);
+  if(valid.length<3)return;
+  const xs=valid.map(k=>k.x),ys=valid.map(k=>k.y);
+  const mnX=Math.min(...xs),mxX=Math.max(...xs),mnY=Math.min(...ys),mxY=Math.max(...ys);
+  const w=canvas.width,h=canvas.height,pad=50;
+  const rX=mxX-mnX||1,rY=mxY-mnY||1;
+  const tw=k=>pad+(k.x-mnX)/rX*(w-pad*2);
+  const th=k=>pad+(k.y-mnY)/rY*(h-pad*2);
+  const ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,w,h);
+  ctx.strokeStyle=color;ctx.lineWidth=2.5;ctx.globalAlpha=0.65;
+  SKEL.forEach(([a,b])=>{
+    const ka=kpts[a],kb=kpts[b];
+    if(!ka||!kb||ka.score<CONF_MIN||kb.score<CONF_MIN)return;
+    ctx.beginPath();ctx.moveTo(tw(ka),th(ka));ctx.lineTo(tw(kb),th(kb));ctx.stroke();
+  });
+  kpts.forEach(k=>{
+    if(k.score<CONF_MIN)return;
+    ctx.fillStyle=color;ctx.globalAlpha=0.9;
+    ctx.beginPath();ctx.arc(tw(k),th(k),3.5,0,Math.PI*2);ctx.fill();
+  });
+}
+
+// ── RAISE-HAND GESTURE ────────────────────────────────────────────────────────
+// Détecte si un poignet est au-dessus du sommet de la tête (keypoint 0 = nose, on use y < nose.y - head_height*factor)
+// Plus robuste : compare poignet vs milieu des épaules
+function checkRaiseGesture(kpts,vw,vh){
+  // Shoulder midpoint y
+  const ls=kpts[5],rs=kpts[6];
+  const lw=kpts[15],rw=kpts[16];
+  const nose=kpts[0];
+
+  // Need at least nose + one shoulder
+  if(!nose||nose.score<0.3){raiseGestReset();return;}
+
+  const shoulderY=(ls&&rs&&ls.score>=0.3&&rs.score>=0.3)
+    ?(ls.y+rs.y)/2
+    :(ls&&ls.score>=0.3?ls.y:(rs&&rs.score>=0.3?rs.y:null));
+
+  if(shoulderY===null){raiseGestReset();return;}
+
+  // Head height estimate (nose to shoulder typically ~20% of body)
+  const headH=Math.abs(shoulderY-nose.y)||vh*0.12;
+
+  // Raised = wrist clearly above nose
+  const threshold=nose.y-headH*0.6;
+  let raised=false;
+  [lw,rw].forEach(w=>{
+    if(w&&w.score>=0.3&&w.y<threshold)raised=true;
+  });
+
+  const bar=$('gz-bar'),lbl=$('gz-lbl');
+  if(raised){
+    gzPct=Math.min(gzPct+50/GESTURE_MS*100,100);
+    if(bar)bar.style.width=gzPct+'%';
+    if(lbl)lbl.classList.add('lit');
+    if(gzPct>=100){
+      gzPct=0;
+      if(bar)bar.style.width='0%';
+      if(lbl)lbl.classList.remove('lit');
+      setMode('record');
+    }
+  }else{
+    raiseGestReset();
+  }
+}
+function raiseGestReset(){
+  gzPct=Math.max(0,gzPct-50/GESTURE_MS*100*3);
+  const bar=$('gz-bar');if(bar)bar.style.width=gzPct+'%';
+  const lbl=$('gz-lbl');if(lbl&&gzPct<5)lbl.classList.remove('lit');
+}
+
+// ── BUTTON HOVER GESTURE ──────────────────────────────────────────────────────
+// User can hover the record button with their hand for BTN_HOVER_MS to trigger recording
+function checkBtnHover(kpts,vw,vh){
+  const hp=bestHand(kpts);
+  if(!hp){btnHoverReset();return;}
+  const btn=$('btn-record');
+  if(!btn){btnHoverReset();return;}
+  const r=btn.getBoundingClientRect();
+  // Map hand to screen coords
+  const sx=(1-hp.x/vw)*window.innerWidth;
+  const sy=(hp.y/vh)*window.innerHeight;
+  const over=sx>=r.left&&sx<=r.right&&sy>=r.top&&sy<=r.bottom;
+  const fill=$('btn-record-fill');
+  if(over){
+    btnHoverActive=true;
+    btnHoverPct=Math.min(btnHoverPct+50/BTN_HOVER_MS*100,100);
+    if(fill)fill.style.width=btnHoverPct+'%';
+    $('cursor').classList.add('active');
+    if(btnHoverPct>=100){
+      btnHoverPct=0;if(fill)fill.style.width='0%';
+      setMode('record');
+    }
+  }else{
+    btnHoverReset();
+  }
+}
+function btnHoverReset(){
+  if(btnHoverPct>0){
+    btnHoverPct=Math.max(0,btnHoverPct-50/BTN_HOVER_MS*100*4);
+    const f=$('btn-record-fill');if(f)f.style.width=btnHoverPct+'%';
+  }
+  btnHoverActive=false;
+}
+
+// ── RECORD SESSION ───────────────────────────────────────────────────────────
+function startRecordSession(){
+  sessionCaptures=0;lastCapturedNorm=null;cdSec=RECORD_SECS;
+  updateCdUI(cdSec);$('cd-wrap').classList.add('on');
+  $('cd-cap-count').textContent='0 POSTURE CAPTURÉE';
+  $('rec-stat').textContent='EN ATTENTE DE POSTURE…';
+
+  cdTimer=setInterval(()=>{
+    cdSec--;updateCdUI(cdSec);
+    if(cdSec<=0){clearInterval(cdTimer);clearInterval(captureTimer);finishRecordSession();}
+  },1000);
+
+  // Capture every CAPTURE_EVERY ms if pose is good and different enough
+  captureTimer=setInterval(()=>{
+    if(!currentPose||(currentPose.score||0)<CONF_MIN)return;
+    const nc=normPose(currentPose.keypoints);
+    if(!nc)return;
+    if(lastCapturedNorm&&poseDist(nc,lastCapturedNorm)<MIN_POSE_DIST)return;
+    snapPose();
+    lastCapturedNorm=nc;
+  },CAPTURE_EVERY);
+}
+
+function stopRecordSession(){
+  clearInterval(cdTimer);clearInterval(captureTimer);
+  cdTimer=null;captureTimer=null;
+  const cw=$('cd-wrap');if(cw)cw.classList.remove('on');
+}
+
+function snapPose(){
+  const v=$('rec-video');
+  if(!v||!currentPose)return;
+  const snap=document.createElement('canvas');
+  snap.width=v.videoWidth;snap.height=v.videoHeight;
+  const sc=snap.getContext('2d');
+  sc.save();sc.scale(-1,1);sc.drawImage(v,-snap.width,0);sc.restore();
+  recordings.push({
+    keypoints:currentPose.keypoints.map(k=>({...k})),
+    snapshot:snap.toDataURL('image/jpeg',0.82),
+    timestamp:Date.now()
+  });
+  sessionCaptures++;
+  const cc=$('cd-cap-count');
+  if(cc)cc.textContent=`${sessionCaptures} POSTURE${sessionCaptures>1?'S':''} CAPTURÉE${sessionCaptures>1?'S':''}`;
+  // Tiny flash per capture
+  const rf=$('rec-flash');
+  if(rf){rf.style.transition='none';rf.style.opacity='0.07';setTimeout(()=>{rf.style.transition='opacity 0.25s';rf.style.opacity='0';},30);}
+}
+
+function finishRecordSession(){
+  stopRecordSession();
+  const rf=$('rec-flash');
+  if(rf){rf.style.transition='none';rf.style.opacity='0.5';setTimeout(()=>{rf.style.transition='opacity 0.9s';rf.style.opacity='0';},60);}
+  const msg=sessionCaptures>0
+    ?`${sessionCaptures} posture${sessionCaptures>1?'s':''} enregistrée${sessionCaptures>1?'s':''} ✓`
+    :'Aucune posture détectée — réessayez';
+  toast(msg,3000);
+  setTimeout(()=>setMode('observe'),1000);
+}
+
+function updateCdUI(s){
+  const n=$('cd-n'),r=$('cd-ring');
+  if(n)n.textContent=s;
+  if(r)r.style.strokeDashoffset=CIRC*(1-s/RECORD_SECS);
+}
+
+// ── POSE MATH ────────────────────────────────────────────────────────────────
+function normPose(kpts){
+  const v=kpts.filter(k=>k.score>=CONF_MIN);
+  if(v.length<4)return null;
+  const cx=v.reduce((s,k)=>s+k.x,0)/v.length;
+  const cy=v.reduce((s,k)=>s+k.y,0)/v.length;
+  const sc=Math.sqrt(v.reduce((s,k)=>s+(k.x-cx)**2+(k.y-cy)**2,0)/v.length)||1;
+  return kpts.map(k=>({...k,nx:k.score>=CONF_MIN?(k.x-cx)/sc:null,ny:k.score>=CONF_MIN?(k.y-cy)/sc:null}));
+}
+function poseDist(a,b){
+  if(!a||!b)return 999;
+  let tot=0,cnt=0;
+  for(let i=5;i<17;i++){
+    const ka=a[i],kb=b[i];
+    if(!ka||!kb||ka.nx===null||kb.nx===null)continue;
+    tot+=Math.sqrt((ka.nx-kb.nx)**2+(ka.ny-kb.ny)**2);cnt++;
+  }
+  return cnt===0?999:tot/cnt;
+}
+function poseScore(d){return Math.max(0,1-d/1.4);}
+
+// ── OBSERVE MATCHING ─────────────────────────────────────────────────────────
+function updateMatch(kpts){
+  if(!recordings.length){noMatchUI();return;}
+  const nc=normPose(kpts);if(!nc){noMatchUI();return;}
+  let bestDist=999,bestIdx=-1;
+  recordings.forEach((r,i)=>{
+    const d=poseDist(nc,normPose(r.keypoints));
+    if(d<bestDist){bestDist=d;bestIdx=i;}
+  });
+  const score=poseScore(bestDist);
+  if(score<MATCH_MIN){noMatchUI();currentMatchIdx=-1;lastSwitchNorm=null;return;}
+  let doSwitch=false;
+  if(bestIdx!==currentMatchIdx){
+    doSwitch=!lastSwitchNorm||poseDist(nc,lastSwitchNorm)>CHANGE_DELTA;
+  }
+  if(doSwitch){
+    currentMatchIdx=bestIdx;lastSwitchNorm=nc;
+    showMatch(bestIdx,score);
+  }else{
+    // Update score only
+    if(currentMatchIdx>=0){
+      const rec=recordings[currentMatchIdx];
+      const sc=$('mp-score');
+      if(sc)sc.textContent=`CORRESPONDANCE ${Math.round(poseScore(bestDist)*100)}%  ·  POSTURE ${String(currentMatchIdx+1).padStart(2,'0')} / ${recordings.length}`;
+    }
+  }
+}
+
+function showMatch(idx,score){
+  const rec=recordings[idx];
+  const photo=$('match-photo'),skelC=$('match-skel-canvas');
+  const nm=$('no-match-msg'),panel=$('match-panel');
+  const mpScore=$('mp-score'),mpTs=$('mp-ts');
+  if(nm)nm.style.display='none';
+  if(photo){
+    photo.classList.remove('vis');
+    photo.src=rec.snapshot;
+    const go=()=>photo.classList.add('vis');
+    if(photo.complete&&photo.naturalWidth>0)go();else photo.onload=go;
+  }
+  if(skelC&&photo){
+    const doSkel=()=>{
+      skelC.width=photo.naturalWidth||1280;
+      skelC.height=photo.naturalHeight||720;
+      drawSkelOnCanvas(skelC,rec.keypoints,'#6ea8c8');
+    };
+    if(photo.complete&&photo.naturalWidth>0)doSkel();else photo.onload=doSkel;
+  }
+  if(panel)panel.classList.add('vis');
+  if(mpScore)mpScore.textContent=`CORRESPONDANCE ${Math.round(score*100)}%  ·  POSTURE ${String(idx+1).padStart(2,'0')} / ${recordings.length}`;
+  if(mpTs)mpTs.textContent=rec.timestamp?fmtDate(rec.timestamp):'';
+  // Flash
+  const f=$('obs-flash');
+  if(f){f.style.transition='none';f.style.opacity='0.08';setTimeout(()=>{f.style.transition='opacity 0.4s';f.style.opacity='0';},50);}
+}
+
+function resetMatchUI(){noMatchUI();const sc=$('match-skel-canvas');if(sc){const c=sc.getContext('2d');c.clearRect(0,0,sc.width,sc.height);}}
+function noMatchUI(){
+  const p=$('match-photo');if(p)p.classList.remove('vis');
+  const nm=$('no-match-msg');if(nm)nm.style.display='flex';
+  const panel=$('match-panel');if(panel)panel.classList.remove('vis');
+}
+
+// ── BOOT ─────────────────────────────────────────────────────────────────────
+window.addEventListener('load',async()=>{
+  await initCam();
+  initModel();
+  startSplashAuto();
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Réseau de neurones</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a10; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="nn"></canvas>
+<script>
+const canvas = document.getElementById('nn');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+const LAYERS = [8, 14, 14, 14, 8, 4];
+let nodes = [], edges = [], pulses = [];
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  buildNetwork();
+}
+
+function buildNetwork() {
+  nodes = []; edges = []; pulses = [];
+  const marginX = W * 0.07;
+  const usableW = W - marginX * 2;
+  const layerCount = LAYERS.length;
+
+  LAYERS.forEach((count, li) => {
+    const x = marginX + (li / (layerCount - 1)) * usableW;
+    const totalH = H * 0.74;
+    const startY = (H - totalH) / 2;
+    for (let ni = 0; ni < count; ni++) {
+      const y = count === 1 ? H / 2 : startY + (ni / (count - 1)) * totalH;
+      nodes.push({
+        x, y, li, ni,
+        r: 3.5 + Math.random() * 2,
+        glow: Math.random() * 0.4,
+        glowDir: Math.random() > 0.5 ? 1 : -1,
+        glowSpeed: 0.004 + Math.random() * 0.006,
+        baseAlpha: 0.2 + Math.random() * 0.4
+      });
+    }
+  });
+
+  LAYERS.forEach((_, li) => {
+    if (li >= LAYERS.length - 1) return;
+    const from = nodes.filter(n => n.li === li);
+    const to   = nodes.filter(n => n.li === li + 1);
+    from.forEach(f => {
+      to.forEach(t => {
+        if (Math.random() < 0.52) {
+          edges.push({ from: f, to: t, w: 0.1 + Math.random() * 0.6, alpha: 0.04 + Math.random() * 0.09 });
+        }
+      });
+    });
+  });
+
+  // Skip connections
+  LAYERS.forEach((_, li) => {
+    if (li >= LAYERS.length - 2) return;
+    const from = nodes.filter(n => n.li === li);
+    const to   = nodes.filter(n => n.li === li + 2);
+    from.forEach(f => {
+      if (Math.random() < 0.10) {
+        const t = to[Math.floor(Math.random() * to.length)];
+        if (t) edges.push({ from: f, to: t, w: 0.06 + Math.random() * 0.18, alpha: 0.02 + Math.random() * 0.04 });
+      }
+    });
+  });
+
+  setInterval(() => {
+    if (pulses.length > 35) return;
+    const path = [];
+    const startPool = nodes.filter(n => n.li === 0);
+    let cur = startPool[Math.floor(Math.random() * startPool.length)];
+    path.push(cur);
+    for (let li = 1; li < LAYERS.length; li++) {
+      const cands = edges.filter(e => e.from === cur && e.to.li === li).map(e => e.to);
+      if (!cands.length) break;
+      cur = cands[Math.floor(Math.random() * cands.length)];
+      path.push(cur);
+    }
+    if (path.length >= LAYERS.length - 1) {
+      const cols = ['teal', 'purple', 'pink'];
+      pulses.push({
+        path, t: 0,
+        speed: 0.003 + Math.random() * 0.005,
+        intensity: 0.35 + Math.random() * 0.65,
+        col: cols[Math.floor(Math.random() * cols.length)]
+      });
+    }
+  }, 220);
+}
+
+function pc(col, a) {
+  if (col === 'teal')   return `rgba(111,255,212,${a})`;
+  if (col === 'purple') return `rgba(165,148,255,${a})`;
+  return `rgba(255,120,155,${a})`;
+}
+
+const LAYER_LABELS = ['Entrée', 'Couche\ncachée', null, null, 'Couche\ncachée', 'Sortie'];
+const LAYER_COLORS = [
+  'rgba(111,255,212,0.55)',
+  'rgba(165,148,255,0.45)',
+  null, null,
+  'rgba(165,148,255,0.45)',
+  'rgba(255,120,155,0.55)'
+];
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#0a0a10';
+  ctx.fillRect(0, 0, W, H);
+
+  // Halos de couche
+  const layerCount = LAYERS.length;
+  LAYERS.forEach((_, li) => {
+    const x = W * 0.07 + (li / (layerCount - 1)) * (W * 0.86);
+    const g = ctx.createRadialGradient(x, H/2, 0, x, H/2, H * 0.45);
+    g.addColorStop(0, 'rgba(124,111,255,0.025)');
+    g.addColorStop(1, 'rgba(124,111,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  });
+
+  // Arêtes
+  edges.forEach(e => {
+    ctx.beginPath();
+    ctx.moveTo(e.from.x, e.from.y);
+    const mx = (e.from.x + e.to.x) / 2;
+    const my = (e.from.y + e.to.y) / 2;
+    ctx.quadraticCurveTo(mx, my, e.to.x, e.to.y);
+    ctx.strokeStyle = `rgba(255,255,255,${e.alpha})`;
+    ctx.lineWidth = e.w;
+    ctx.stroke();
+  });
+
+  // Pulses
+  pulses.forEach(p => {
+    const segs = p.path.length - 1;
+    if (segs < 1) return;
+    const gt = p.t * segs;
+    const seg = Math.min(Math.floor(gt), segs - 1);
+    const st = gt - seg;
+    const f = p.path[seg], t = p.path[seg + 1];
+    if (!f || !t) return;
+
+    const px = f.x + (t.x - f.x) * st;
+    const py = f.y + (t.y - f.y) * st;
+
+    if (st < 0.15) f.glow = Math.max(f.glow, p.intensity * 0.95);
+
+    // Traîne
+    for (let i = 0; i < 10; i++) {
+      const bt = Math.max(0, st - i * 0.014);
+      const bx = f.x + (t.x - f.x) * bt;
+      const by = f.y + (t.y - f.y) * bt;
+      ctx.beginPath();
+      ctx.arc(bx, by, Math.max(0.1, 2.5 - i * 0.22), 0, Math.PI * 2);
+      ctx.fillStyle = pc(p.col, p.intensity * (1 - i / 10) * 0.6);
+      ctx.fill();
+    }
+
+    // Tête
+    ctx.beginPath();
+    ctx.arc(px, py, 4, 0, Math.PI * 2);
+    ctx.fillStyle = pc(p.col, p.intensity);
+    ctx.fill();
+
+    // Halo tête
+    const gr = ctx.createRadialGradient(px, py, 0, px, py, 18);
+    gr.addColorStop(0, pc(p.col, p.intensity * 0.4));
+    gr.addColorStop(1, pc(p.col, 0));
+    ctx.beginPath();
+    ctx.arc(px, py, 18, 0, Math.PI * 2);
+    ctx.fillStyle = gr;
+    ctx.fill();
+
+    p.t += p.speed;
+  });
+
+  pulses = pulses.filter(p => p.t < 1.02);
+
+  // Noeuds
+  nodes.forEach(n => {
+    n.glow += n.glowDir * n.glowSpeed;
+    if (n.glow > 0.75) n.glowDir = -1;
+    if (n.glow < 0) { n.glowDir = 1; n.glow = 0; }
+
+    const g = Math.max(0, n.glow);
+
+    if (g > 0.06) {
+      const gr = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.r * 6);
+      gr.addColorStop(0, `rgba(165,148,255,${g * 0.3})`);
+      gr.addColorStop(1, `rgba(165,148,255,0)`);
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.r * 6, 0, Math.PI * 2);
+      ctx.fillStyle = gr;
+      ctx.fill();
+    }
+
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,255,255,${n.baseAlpha + g * 0.55})`;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.r + 2.5, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255,255,255,${0.04 + g * 0.2})`;
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+
+    n.glow = Math.max(0, n.glow - 0.015);
+  });
+
+  // Labels de couche
+  ctx.textAlign = 'center';
+  LAYERS.forEach((count, li) => {
+    if (!LAYER_LABELS[li]) return;
+    const x = W * 0.07 + (li / (layerCount - 1)) * (W * 0.86);
+    const topY = nodes.filter(n => n.li === li).reduce((a, b) => a.y < b.y ? a : b).y;
+
+    ctx.fillStyle = LAYER_COLORS[li];
+    ctx.font = `500 13px 'Segoe UI', sans-serif`;
+    const lines = LAYER_LABELS[li].split('\n');
+    lines.forEach((line, i) => {
+      ctx.fillText(line, x, topY - 30 - (lines.length - 1 - i) * 16);
+    });
+
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.font = `11px monospace`;
+    ctx.fillText(count + ' neurones', x, topY - 13);
+  });
+
+  requestAnimationFrame(draw);
+}
+
+window.addEventListener('resize', resize);
+resize();
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

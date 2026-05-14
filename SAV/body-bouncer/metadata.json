@@ -1,0 +1,8 @@
+{
+  "name": "Body Bouncer",
+  "description": "Utilisez l'ossature de votre corps en caméra pour guider des boules vers la sortie et faire le plus de points en une minute. Jouable à un ou deux !",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": []
+}

@@ -1,0 +1,549 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500&display=swap');
+  :root {
+    --bg: #0a0a10;
+    --surface: rgba(16,16,24,0.82);
+    --surface2: rgba(22,22,34,0.75);
+    --border: rgba(255,255,255,0.07);
+    --accent-a: #7C6FFF;
+    --accent-b: #FF6F91;
+    --accent-c: #6FFFD4;
+    --text: #f0f0f5;
+    --muted: rgba(240,240,245,0.38);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; min-height: 100vh; overflow-x: hidden; }
+
+  #nn-bg { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+
+  #app { position: relative; z-index: 1; max-width: 900px; margin: 0 auto; padding: 20px 16px; display: grid; grid-template-rows: auto 1fr auto; min-height: 100vh; gap: 16px; }
+
+  header { display: flex; align-items: baseline; gap: 16px; padding-bottom: 12px; border-bottom: 0.5px solid var(--border); }
+  header h1 { font-family: 'Space Mono', monospace; font-size: 16px; font-weight: 700; color: var(--accent-a); letter-spacing: -0.5px; }
+  header p { font-size: 13px; color: var(--muted); }
+
+  .main-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+
+  .panel { background: var(--surface); border: 0.5px solid var(--border); border-radius: 12px; overflow: hidden; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+  .panel-header { padding: 10px 14px; border-bottom: 0.5px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .panel-title { font-family: 'Space Mono', monospace; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  .panel-body { padding: 14px; }
+
+  .gestures-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+  .gesture-btn { background: var(--surface2); border: 0.5px solid var(--border); border-radius: 10px; padding: 14px 10px; cursor: pointer; text-align: center; transition: all 0.15s; color: var(--text); font-family: 'DM Sans', sans-serif; }
+  .gesture-btn:hover { background: rgba(30,30,45,0.8); border-color: rgba(255,255,255,0.14); }
+  .gesture-btn.selected { border-color: var(--accent-a); background: rgba(124,111,255,0.1); }
+  .gesture-icon { font-size: 26px; margin-bottom: 6px; display: block; }
+  .gesture-label { font-size: 11px; color: var(--muted); }
+  .gesture-count { display: inline-block; margin-top: 4px; background: rgba(124,111,255,0.18); color: var(--accent-a); font-size: 10px; font-family: 'Space Mono', monospace; padding: 2px 6px; border-radius: 20px; }
+
+  .train-btn { width: 100%; background: var(--accent-a); color: #fff; border: none; border-radius: 8px; padding: 10px; font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; transition: opacity 0.15s; margin-top: 4px; }
+  .train-btn:hover { opacity: 0.85; }
+
+  #canvas-wrap { background: rgba(18,18,28,0.7); border-radius: 8px; overflow: hidden; cursor: crosshair; margin-bottom: 10px; }
+  #draw-canvas { display: block; width: 100%; }
+
+  #predict-btn { width: 100%; background: transparent; border: 0.5px solid var(--accent-c); color: var(--accent-c); border-radius: 8px; padding: 10px; font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+  #predict-btn:hover { background: rgba(111,255,212,0.07); }
+  #predict-btn:disabled { opacity: 0.28; cursor: not-allowed; }
+
+  .result-area { min-height: 80px; background: rgba(18,18,28,0.7); border-radius: 8px; padding: 12px; margin-top: 10px; font-size: 13px; color: var(--muted); line-height: 1.6; }
+  .prediction-big { font-family: 'Space Mono', monospace; font-size: 22px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .prediction-conf { font-size: 12px; color: var(--muted); }
+  .conf-bar { height: 3px; border-radius: 2px; background: rgba(255,255,255,0.08); margin-top: 8px; overflow: hidden; }
+  .conf-fill { height: 100%; border-radius: 2px; transition: width 0.4s ease; }
+  .insight-box { background: rgba(255,111,145,0.07); border: 0.5px solid rgba(255,111,145,0.28); border-radius: 8px; padding: 10px 12px; font-size: 12px; color: rgba(255,111,145,0.88); line-height: 1.6; margin-top: 8px; }
+
+  footer { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding-top: 8px; border-top: 0.5px solid var(--border); }
+  .stat-card { background: var(--surface); border: 0.5px solid var(--border); border-radius: 8px; padding: 10px 12px; text-align: center; backdrop-filter: blur(10px); }
+  .stat-val { font-family: 'Space Mono', monospace; font-size: 20px; font-weight: 700; color: var(--accent-a); }
+  .stat-label { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  .training-log { max-height: 90px; overflow-y: auto; font-family: 'Space Mono', monospace; font-size: 10px; color: var(--muted); line-height: 1.8; padding: 8px; background: rgba(18,18,28,0.7); border-radius: 6px; margin-top: 8px; }
+  .log-entry { display: flex; gap: 8px; }
+  .log-time { color: rgba(124,111,255,0.55); }
+
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.45} }
+  .pulsing { animation: pulse 1.2s ease-in-out infinite; }
+
+  .ctrl-btn { background: var(--surface2); border: 0.5px solid var(--border); border-radius: 7px; padding: 4px 10px; color: var(--muted); font-size: 11px; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.1s; }
+  .ctrl-btn:hover { color: var(--text); }
+</style>
+</head>
+<body>
+
+<canvas id="nn-bg"></canvas>
+
+<div id="app">
+  <header>
+    <h1>APPRENDS-MOI_</h1>
+    <p>Entraîne une IA avec tes gestes — en temps réel</p>
+  </header>
+
+  <div class="main-grid">
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">01 — Entraîne</span>
+        <span style="font-size:11px;color:var(--muted)" id="total-label">0 exemples</span>
+      </div>
+      <div class="panel-body">
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">Sélectionne un geste, dessine-le à droite, puis clique <strong style="color:var(--text)">"Ajouter l'exemple"</strong>. Répète plusieurs fois.</p>
+        <div class="gestures-grid">
+          <button class="gesture-btn selected" data-gesture="cercle" onclick="selectGesture(this)">
+            <span class="gesture-icon">○</span>
+            <div style="font-size:13px;font-weight:500">Cercle</div>
+            <div class="gesture-label">geste arrondi</div>
+            <span class="gesture-count" id="count-cercle">0</span>
+          </button>
+          <button class="gesture-btn" data-gesture="zigzag" onclick="selectGesture(this)">
+            <span class="gesture-icon">〜</span>
+            <div style="font-size:13px;font-weight:500">Zigzag</div>
+            <div class="gesture-label">geste en vagues</div>
+            <span class="gesture-count" id="count-zigzag">0</span>
+          </button>
+          <button class="gesture-btn" data-gesture="ligne" onclick="selectGesture(this)">
+            <span class="gesture-icon">—</span>
+            <div style="font-size:13px;font-weight:500">Ligne</div>
+            <div class="gesture-label">geste horizontal</div>
+            <span class="gesture-count" id="count-ligne">0</span>
+          </button>
+          <button class="gesture-btn" data-gesture="croix" onclick="selectGesture(this)">
+            <span class="gesture-icon">✕</span>
+            <div style="font-size:13px;font-weight:500">Croix</div>
+            <div class="gesture-label">deux traits croisés</div>
+            <span class="gesture-count" id="count-croix">0</span>
+          </button>
+        </div>
+        <button class="train-btn" onclick="addExample()">+ Ajouter l'exemple</button>
+        <div class="training-log" id="log"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <span class="panel-title">02 — Dessine</span>
+        <button class="ctrl-btn" onclick="clearCanvas()">Effacer</button>
+      </div>
+      <div class="panel-body">
+        <div id="canvas-wrap">
+          <canvas id="draw-canvas" width="300" height="200"></canvas>
+        </div>
+        <button id="predict-btn" onclick="predict()" disabled>Que voit l'IA ? →</button>
+        <div class="result-area" id="result">
+          <span style="font-size:12px">Entraîne d'abord l'IA avec au moins 2 gestes différents, puis dessine et teste !</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <div class="stat-card"><div class="stat-val" id="s-exemples">0</div><div class="stat-label">exemples donnés</div></div>
+    <div class="stat-card"><div class="stat-val" id="s-gestes">0</div><div class="stat-label">gestes différents</div></div>
+    <div class="stat-card"><div class="stat-val" id="s-tests">0</div><div class="stat-label">prédictions faites</div></div>
+    <div class="stat-card"><div class="stat-val" id="s-score">—</div><div class="stat-label">précision estimée</div></div>
+  </footer>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════
+   RÉSEAU DE NEURONES — FOND ANIMÉ
+   Architecture : 8 → 12 → 12 → 8 → 4
+   Colonnes espacées sur toute la largeur
+═══════════════════════════════════════════════ */
+const bgCanvas = document.getElementById('nn-bg');
+const bgCtx = bgCanvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = bgCanvas.width = window.innerWidth;
+  H = bgCanvas.height = window.innerHeight;
+  buildNetwork();
+}
+
+const LAYERS = [8, 14, 14, 14, 8, 4];
+let nodes = [], edges = [], pulses = [];
+
+function buildNetwork() {
+  nodes = [];
+  edges = [];
+  pulses = [];
+
+  const marginX = W * 0.06;
+  const usableW = W - marginX * 2;
+  const layerCount = LAYERS.length;
+
+  LAYERS.forEach((count, li) => {
+    const x = marginX + (li / (layerCount - 1)) * usableW;
+    const totalH = H * 0.72;
+    const startY = (H - totalH) / 2;
+    for (let ni = 0; ni < count; ni++) {
+      const y = count === 1
+        ? H / 2
+        : startY + (ni / (count - 1)) * totalH;
+      nodes.push({ x, y, li, ni, r: 3.5 + Math.random() * 1.5, glow: 0, glowDir: Math.random() > 0.5 ? 1 : -1, baseAlpha: 0.25 + Math.random() * 0.35 });
+    }
+  });
+
+  // Connexions entre couches adjacentes — pas toutes
+  for (let li = 0; li < LAYERS.length - 1; li++) {
+    const fromNodes = nodes.filter(n => n.li === li);
+    const toNodes   = nodes.filter(n => n.li === li + 1);
+    fromNodes.forEach(from => {
+      toNodes.forEach(to => {
+        if (Math.random() < 0.55) {
+          const w = 0.12 + Math.random() * 0.55; // poids = épaisseur
+          edges.push({ from, to, w, alpha: 0.04 + Math.random() * 0.10 });
+        }
+      });
+    });
+  }
+
+  // Quelques connexions "longue portée" (skip connections)
+  for (let li = 0; li < LAYERS.length - 2; li++) {
+    const fromNodes = nodes.filter(n => n.li === li);
+    const toNodes   = nodes.filter(n => n.li === li + 2);
+    fromNodes.forEach(from => {
+      if (Math.random() < 0.12) {
+        const to = toNodes[Math.floor(Math.random() * toNodes.length)];
+        if (to) edges.push({ from, to, w: 0.08 + Math.random() * 0.22, alpha: 0.03 + Math.random() * 0.05, skip: true });
+      }
+    });
+  }
+
+  spawnPulses();
+}
+
+function spawnPulses() {
+  // Lance des signaux régulièrement
+  setInterval(() => {
+    if (pulses.length > 28) return;
+    // Choix d'un chemin aléatoire de gauche à droite
+    const path = [];
+    let currentLayer = nodes.filter(n => n.li === 0);
+    let cur = currentLayer[Math.floor(Math.random() * currentLayer.length)];
+    path.push(cur);
+    for (let li = 1; li < LAYERS.length; li++) {
+      const candidates = edges
+        .filter(e => e.from === cur && e.to.li === li)
+        .map(e => e.to);
+      if (candidates.length === 0) break;
+      cur = candidates[Math.floor(Math.random() * candidates.length)];
+      path.push(cur);
+    }
+    if (path.length >= LAYERS.length - 1) {
+      const intensity = 0.4 + Math.random() * 0.6;
+      const speed = 0.004 + Math.random() * 0.006;
+      const col = Math.random() < 0.6 ? 'teal' : Math.random() < 0.5 ? 'purple' : 'pink';
+      pulses.push({ path, t: 0, speed, intensity, col });
+    }
+  }, 280);
+}
+
+function pulseColor(col, alpha) {
+  if (col === 'teal')   return `rgba(111,255,212,${alpha})`;
+  if (col === 'purple') return `rgba(124,111,255,${alpha})`;
+  return `rgba(255,111,145,${alpha})`;
+}
+
+function drawNN(ts) {
+  bgCtx.clearRect(0, 0, W, H);
+
+  // Fond très sombre
+  bgCtx.fillStyle = 'rgba(10,10,16,1)';
+  bgCtx.fillRect(0, 0, W, H);
+
+  // Halos de couche subtils
+  const layerCount = LAYERS.length;
+  LAYERS.forEach((_, li) => {
+    const x = W * 0.06 + (li / (layerCount - 1)) * (W * 0.88);
+    const grad = bgCtx.createRadialGradient(x, H/2, 0, x, H/2, H * 0.42);
+    grad.addColorStop(0, 'rgba(124,111,255,0.018)');
+    grad.addColorStop(1, 'rgba(124,111,255,0)');
+    bgCtx.fillStyle = grad;
+    bgCtx.fillRect(0, 0, W, H);
+  });
+
+  // ── Arêtes ──
+  edges.forEach(e => {
+    bgCtx.beginPath();
+    bgCtx.moveTo(e.from.x, e.from.y);
+
+    // Courbe de Bézier légère
+    const cx = (e.from.x + e.to.x) / 2;
+    const cy = (e.from.y + e.to.y) / 2 + (Math.random() < 0.3 ? (Math.random()-0.5)*18 : 0);
+    bgCtx.quadraticCurveTo(cx, cy, e.to.x, e.to.y);
+
+    bgCtx.strokeStyle = `rgba(255,255,255,${e.alpha})`;
+    bgCtx.lineWidth = e.w;
+    bgCtx.stroke();
+  });
+
+  // ── Pulses ──
+  pulses.forEach(p => {
+    if (p.path.length < 2) return;
+    const totalSegs = p.path.length - 1;
+    const globalT = p.t * totalSegs;
+    const seg = Math.min(Math.floor(globalT), totalSegs - 1);
+    const segT = globalT - seg;
+    const from = p.path[seg], to = p.path[seg + 1];
+    if (!from || !to) return;
+
+    const px = from.x + (to.x - from.x) * segT;
+    const py = from.y + (to.y - from.y) * segT;
+
+    // Éclat sur les nœuds traversés
+    if (segT < 0.12) {
+      from.glow = Math.max(from.glow, p.intensity * 0.9);
+    }
+
+    // Traîne
+    const trailLen = 0.12;
+    for (let i = 0; i < 8; i++) {
+      const bt = Math.max(0, segT - i * trailLen / 8);
+      const bx = from.x + (to.x - from.x) * bt;
+      const by = from.y + (to.y - from.y) * bt;
+      const a = p.intensity * (1 - i/8) * 0.55;
+      bgCtx.beginPath();
+      bgCtx.arc(bx, by, 2.5 - i*0.25, 0, Math.PI*2);
+      bgCtx.fillStyle = pulseColor(p.col, a);
+      bgCtx.fill();
+    }
+
+    // Tête brillante
+    bgCtx.beginPath();
+    bgCtx.arc(px, py, 3.5, 0, Math.PI*2);
+    bgCtx.fillStyle = pulseColor(p.col, p.intensity * 0.95);
+    bgCtx.fill();
+
+    // Halo
+    const grd = bgCtx.createRadialGradient(px, py, 0, px, py, 14);
+    grd.addColorStop(0, pulseColor(p.col, p.intensity * 0.35));
+    grd.addColorStop(1, pulseColor(p.col, 0));
+    bgCtx.beginPath();
+    bgCtx.arc(px, py, 14, 0, Math.PI*2);
+    bgCtx.fillStyle = grd;
+    bgCtx.fill();
+
+    p.t += p.speed;
+  });
+
+  pulses = pulses.filter(p => p.t < 1.02);
+
+  // ── Nœuds ──
+  nodes.forEach(n => {
+    // Pulsation organique lente
+    n.glow += n.glowDir * 0.006;
+    if (n.glow > 0.7) n.glowDir = -1;
+    if (n.glow < 0)   { n.glowDir = 1; n.glow = 0; }
+
+    const glow = Math.max(0, n.glow);
+
+    // Halo si actif
+    if (glow > 0.08) {
+      const gr = bgCtx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.r * 5);
+      gr.addColorStop(0, `rgba(124,111,255,${glow * 0.28})`);
+      gr.addColorStop(1, `rgba(124,111,255,0)`);
+      bgCtx.beginPath();
+      bgCtx.arc(n.x, n.y, n.r * 5, 0, Math.PI*2);
+      bgCtx.fillStyle = gr;
+      bgCtx.fill();
+    }
+
+    // Nœud
+    bgCtx.beginPath();
+    bgCtx.arc(n.x, n.y, n.r, 0, Math.PI*2);
+    bgCtx.fillStyle = `rgba(255,255,255,${n.baseAlpha + glow * 0.5})`;
+    bgCtx.fill();
+
+    // Anneau extérieur
+    bgCtx.beginPath();
+    bgCtx.arc(n.x, n.y, n.r + 2, 0, Math.PI*2);
+    bgCtx.strokeStyle = `rgba(255,255,255,${0.05 + glow * 0.18})`;
+    bgCtx.lineWidth = 0.5;
+    bgCtx.stroke();
+
+    // Refroidissement progressif
+    n.glow = Math.max(0, n.glow - 0.018);
+  });
+
+  // Labels de couches
+  const labels = ['Entrée', 'Couche\ncachée', '', '', 'Couche\ncachée', 'Sortie'];
+  const labelColors = ['rgba(111,255,212,0.45)', 'rgba(124,111,255,0.35)', '', '', 'rgba(124,111,255,0.35)', 'rgba(255,111,145,0.45)'];
+  LAYERS.forEach((count, li) => {
+    if (!labels[li]) return;
+    const x = W * 0.06 + (li / (LAYERS.length - 1)) * (W * 0.88);
+    const topNode = nodes.filter(n => n.li === li).reduce((a, b) => a.y < b.y ? a : b);
+    bgCtx.fillStyle = labelColors[li];
+    bgCtx.font = '500 10px DM Sans, sans-serif';
+    bgCtx.textAlign = 'center';
+    const lines = labels[li].split('\n');
+    lines.forEach((line, i) => {
+      bgCtx.fillText(line, x, topNode.y - 18 - (lines.length - 1 - i) * 13);
+    });
+    bgCtx.fillStyle = `rgba(255,255,255,0.15)`;
+    bgCtx.font = '10px Space Mono, monospace';
+    bgCtx.fillText(count + ' neurones', x, topNode.y - 6);
+  });
+
+  requestAnimationFrame(drawNN);
+}
+
+window.addEventListener('resize', resize);
+resize();
+requestAnimationFrame(drawNN);
+
+/* ═══════════════════════════════════════════════
+   CANVAS DE DESSIN
+═══════════════════════════════════════════════ */
+const canvas = document.getElementById('draw-canvas');
+const ctx = canvas.getContext('2d');
+let drawing = false, points = [], selectedGesture = 'cercle';
+let examples = { cercle: [], zigzag: [], ligne: [], croix: [] };
+let totalExamples = 0, totalTests = 0, correctTests = 0;
+
+ctx.fillStyle = 'rgba(14,14,22,0.9)';
+ctx.fillRect(0, 0, 300, 200);
+ctx.strokeStyle = '#6FFFD4'; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+
+function getPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  const sx = 300 / rect.width, sy = 200 / rect.height;
+  if (e.touches) return { x: (e.touches[0].clientX - rect.left) * sx, y: (e.touches[0].clientY - rect.top) * sy };
+  return { x: (e.clientX - rect.left) * sx, y: (e.clientY - rect.top) * sy };
+}
+
+canvas.addEventListener('mousedown', e => { drawing = true; points = []; const p = getPos(e); points.push(p); ctx.fillStyle='rgba(14,14,22,0.9)'; ctx.fillRect(0,0,300,200); ctx.beginPath(); ctx.moveTo(p.x,p.y); });
+canvas.addEventListener('mousemove', e => { if (!drawing) return; const p = getPos(e); points.push(p); ctx.strokeStyle='#6FFFD4'; ctx.lineTo(p.x,p.y); ctx.stroke(); });
+canvas.addEventListener('mouseup', () => { drawing = false; if (points.length > 3) document.getElementById('predict-btn').disabled = false; });
+canvas.addEventListener('touchstart', e => { e.preventDefault(); drawing = true; points = []; const p = getPos(e); points.push(p); ctx.fillStyle='rgba(14,14,22,0.9)'; ctx.fillRect(0,0,300,200); ctx.beginPath(); ctx.moveTo(p.x,p.y); }, {passive:false});
+canvas.addEventListener('touchmove', e => { e.preventDefault(); if(!drawing) return; const p = getPos(e); points.push(p); ctx.strokeStyle='#6FFFD4'; ctx.lineTo(p.x,p.y); ctx.stroke(); }, {passive:false});
+canvas.addEventListener('touchend', () => { drawing = false; if (points.length > 3) document.getElementById('predict-btn').disabled = false; });
+
+function clearCanvas() {
+  ctx.fillStyle = 'rgba(14,14,22,0.9)'; ctx.fillRect(0,0,300,200); points = []; ctx.beginPath();
+  document.getElementById('predict-btn').disabled = true;
+  document.getElementById('result').innerHTML = '<span style="font-size:12px">Dessine un geste puis clique "Que voit l\'IA ?"</span>';
+  document.getElementById('result').className = 'result-area';
+}
+
+function selectGesture(btn) {
+  document.querySelectorAll('.gesture-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  selectedGesture = btn.dataset.gesture;
+}
+
+function extractFeatures(pts) {
+  if (pts.length < 4) return null;
+  const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+  const w = Math.max(...xs) - Math.min(...xs) || 1, h = Math.max(...ys) - Math.min(...ys) || 1;
+  const ratio = w / h;
+  let dirChanges = 0;
+  for (let i = 2; i < pts.length; i++) {
+    const dx1 = pts[i-1].x-pts[i-2].x, dy1 = pts[i-1].y-pts[i-2].y;
+    const dx2 = pts[i].x-pts[i-1].x,   dy2 = pts[i].y-pts[i-1].y;
+    if (Math.abs(dx1*dy2-dy1*dx2) > 20 && dx1*dx2+dy1*dy2 < 0) dirChanges++;
+  }
+  let totalLen = 0;
+  for (let i = 1; i < pts.length; i++) totalLen += Math.hypot(pts[i].x-pts[i-1].x, pts[i].y-pts[i-1].y);
+  const startEnd = Math.hypot(pts[0].x-pts[pts.length-1].x, pts[0].y-pts[pts.length-1].y);
+  const closedness = 1 - startEnd / (totalLen || 1);
+  return { ratio: ratio.toFixed(2), dirChanges, closedness: closedness.toFixed(2), totalLen: Math.round(totalLen), points: pts.length };
+}
+
+function addLog(msg, color='var(--muted)') {
+  const log = document.getElementById('log');
+  const t = new Date().toLocaleTimeString('fr', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const el = document.createElement('div');
+  el.className = 'log-entry';
+  el.innerHTML = `<span class="log-time">${t}</span><span style="color:${color}">${msg}</span>`;
+  log.appendChild(el); log.scrollTop = log.scrollHeight;
+}
+
+function addExample() {
+  if (points.length < 5) { addLog('Dessine d\'abord un geste !', 'var(--accent-b)'); return; }
+  const features = extractFeatures(points); if (!features) return;
+  examples[selectedGesture].push({ features, raw: [...points] });
+  totalExamples++;
+  document.getElementById('count-' + selectedGesture).textContent = examples[selectedGesture].length;
+  document.getElementById('total-label').textContent = totalExamples + ' exemple' + (totalExamples > 1 ? 's' : '');
+  addLog(`+ "${selectedGesture}" — ratio=${features.ratio}, courbes=${features.dirChanges}`, 'var(--accent-c)');
+  // Déclenche un burst de pulses pour symboliser l'apprentissage
+  for (let i = 0; i < 5; i++) setTimeout(() => triggerLearningPulse(), i * 120);
+  updateStats(); clearCanvas();
+}
+
+function triggerLearningPulse() {
+  const path = [];
+  let cur = nodes.filter(n => n.li === 0)[Math.floor(Math.random() * LAYERS[0])];
+  path.push(cur);
+  for (let li = 1; li < LAYERS.length; li++) {
+    const cands = edges.filter(e => e.from === cur && e.to.li === li).map(e => e.to);
+    if (!cands.length) break;
+    cur = cands[Math.floor(Math.random() * cands.length)];
+    path.push(cur);
+  }
+  if (path.length >= 3) pulses.push({ path, t: 0, speed: 0.009 + Math.random()*0.007, intensity: 0.85, col: 'teal' });
+}
+
+function updateStats() {
+  document.getElementById('s-exemples').textContent = totalExamples;
+  document.getElementById('s-gestes').textContent = Object.values(examples).filter(v => v.length > 0).length;
+  document.getElementById('s-tests').textContent = totalTests;
+  document.getElementById('s-score').textContent = totalTests > 0 ? Math.round(correctTests/totalTests*100)+'%' : '—';
+}
+
+async function predict() {
+  if (points.length < 5) return;
+  if (!Object.values(examples).some(v => v.length > 0)) { document.getElementById('result').innerHTML = 'Entraîne d\'abord l\'IA !'; return; }
+  const features = extractFeatures(points);
+  const resultEl = document.getElementById('result');
+  resultEl.className = 'result-area pulsing'; resultEl.style.color = 'var(--accent-a)';
+  resultEl.innerHTML = 'Analyse en cours...';
+  document.getElementById('predict-btn').disabled = true;
+
+  const trainingData = Object.entries(examples).filter(([,v])=>v.length>0)
+    .map(([g,exs]) => `Geste "${g}" (${exs.length} ex.): ${exs.slice(-3).map(e=>`ratio=${e.features.ratio}, courbes=${e.features.dirChanges}, fermeture=${e.features.closedness}`).join(' | ')}`).join('\n');
+
+  const prompt = `Tu es un classifieur de gestes dessinés pour une exposition sur l'IA.
+DONNÉES D'ENTRAÎNEMENT :
+${trainingData}
+NOUVEAU GESTE :
+- Ratio largeur/hauteur : ${features.ratio}
+- Changements de direction : ${features.dirChanges}
+- Indice de fermeture : ${features.closedness}
+- Longueur totale : ${features.totalLen}px
+Réponds UNIQUEMENT en JSON valide sans markdown :
+{"prediction":"[nom]","confiance":75,"raison":"[1 phrase pour un enfant]","biais":"[1 phrase sur pourquoi l'IA peut se tromper]","correct":true}`;
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:1000, messages:[{role:'user',content:prompt}] })
+    });
+    const data = await resp.json();
+    const text = data.content.map(c=>c.text||'').join('');
+    const result = JSON.parse(text.replace(/```json|```/g,'').trim());
+    totalTests++;
+    if (result.correct !== false && result.confiance >= 50) correctTests++;
+    const cc = result.confiance >= 70 ? 'var(--accent-c)' : result.confiance >= 40 ? '#FAC775' : 'var(--accent-b)';
+    resultEl.className = 'result-area'; resultEl.style.color = '';
+    resultEl.innerHTML = `<div class="prediction-big">${result.prediction}</div><div class="prediction-conf">Confiance : <span style="color:${cc}">${result.confiance}%</span></div><div class="conf-bar"><div class="conf-fill" style="width:${result.confiance}%;background:${cc}"></div></div><div style="font-size:12px;color:var(--muted);margin-top:8px;line-height:1.5">${result.raison}</div><div class="insight-box">Biais possible : ${result.biais}</div>`;
+    addLog(`→ "${result.prediction}" (${result.confiance}%)`, cc);
+    // Burst de pulses colorés pour symboliser la prédiction
+    const col = result.confiance >= 60 ? 'teal' : 'pink';
+    for (let i = 0; i < 8; i++) setTimeout(() => triggerLearningPulse(), i * 80);
+    updateStats();
+  } catch(e) {
+    resultEl.className = 'result-area'; resultEl.style.color = 'var(--accent-b)';
+    resultEl.innerHTML = 'Erreur de connexion.';
+  }
+  document.getElementById('predict-btn').disabled = false;
+}
+</script>
+</body>
+</html>

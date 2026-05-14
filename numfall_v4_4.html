@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NUMFALL — v4</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<style>
+:root{
+  --bg:#020308; --g1:rgba(0,255,180,0.03); --g2:rgba(0,255,180,0.06);
+  --c:#00ffb4; --cr:#ff2d6b; --cy:#ffe033; --cp:#c084fc; --cb:#38bdf8;
+  --panel:rgba(2,3,8,0.92); --border:rgba(0,255,180,0.12);
+  --text:#dff6f0; --muted:rgba(223,246,240,0.35);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{width:100%;height:100%;background:var(--bg);overflow:hidden;
+  font-family:'Orbitron',monospace;color:var(--text);}
+
+/* grid bg */
+#gbg{position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:linear-gradient(var(--g1) 1px,transparent 1px),
+    linear-gradient(90deg,var(--g1) 1px,transparent 1px);
+  background-size:48px 48px;}
+#gbg::before{content:'';position:absolute;inset:0;
+  background:radial-gradient(ellipse 100% 50% at 50% 110%,rgba(0,255,180,0.07) 0%,transparent 70%);}
+#gbg::after{content:'';position:absolute;inset:0;
+  background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.05) 3px,rgba(0,0,0,0.05) 4px);}
+
+#gc{position:fixed;inset:0;z-index:1;}
+
+/* ── HUD ── */
+#hud{position:fixed;top:0;left:0;right:0;z-index:20;height:72px;
+  display:flex;align-items:stretch;
+  border-bottom:1px solid var(--border);
+  background:linear-gradient(180deg,rgba(2,3,8,0.99) 0%,rgba(2,3,8,0) 100%);}
+.hb{display:flex;flex-direction:column;justify-content:center;align-items:center;
+  padding:0 20px;border-right:1px solid var(--border);min-width:110px;}
+.hb:last-child{border-right:none;margin-left:auto;}
+.hl{font-size:9px;letter-spacing:.25em;color:var(--c);opacity:.55;
+  text-transform:uppercase;margin-bottom:3px;font-family:'Share Tech Mono',monospace;}
+.hv{font-family:'Share Tech Mono',monospace;font-size:28px;line-height:1;}
+.lrow{display:flex;gap:7px;align-items:center;}
+.ld{width:13px;height:13px;border-radius:50%;background:var(--c);
+  box-shadow:0 0 9px var(--c);transition:all .3s;}
+.ld.off{background:rgba(255,255,255,0.08);box-shadow:none;}
+
+/* ── Mission ── */
+#mbar{position:fixed;top:72px;left:0;right:0;z-index:20;
+  display:flex;flex-direction:column;align-items:center;
+  padding:12px 24px 10px;
+  background:rgba(0,255,180,0.04);
+  border-bottom:1px solid rgba(0,255,180,0.07);}
+#mtxt{font-family:'Orbitron',monospace;font-weight:900;
+  font-size:clamp(22px,4vw,48px);color:var(--c);
+  letter-spacing:.12em;text-align:center;line-height:1.15;
+  text-shadow:0 0 24px rgba(0,255,180,0.45);}
+#msub{font-family:'Share Tech Mono',monospace;font-size:14px;
+  color:rgba(223,246,240,0.55);margin-top:6px;letter-spacing:.08em;}
+.mbadge{display:inline-block;margin-left:10px;font-size:11px;
+  padding:3px 10px;border:1px solid var(--cr);border-radius:2px;
+  color:var(--cr);letter-spacing:.12em;font-family:'Share Tech Mono',monospace;
+  vertical-align:middle;}
+
+/* ── Fact central ── */
+#factcenter{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  z-index:15;pointer-events:none;
+  display:flex;flex-direction:column;align-items:center;gap:10px;
+  text-align:center;max-width:70vw;
+  opacity:0;transition:opacity .3s;}
+#factcenter.show{opacity:1;}
+#fc-icon{font-size:44px;filter:drop-shadow(0 0 12px rgba(0,255,180,0.5));}
+#fc-text{font-family:'Share Tech Mono',monospace;font-size:clamp(15px,2.2vw,22px);
+  color:#dff6f0;letter-spacing:.04em;line-height:1.55;
+  text-shadow:0 0 18px rgba(0,255,180,0.25);
+  background:rgba(2,3,8,0.72);border:1px solid rgba(0,255,180,0.14);
+  border-radius:8px;padding:14px 24px;backdrop-filter:blur(6px);}
+
+/* Fact bar bas — gardée pour le conseil permanent */
+#fbar{position:fixed;bottom:0;left:0;right:0;z-index:20;height:46px;
+  display:flex;align-items:center;gap:12px;padding:0 20px;
+  border-top:1px solid var(--border);
+  background:linear-gradient(0deg,rgba(2,3,8,.99) 0%,rgba(2,3,8,0) 100%);}
+#ficon{font-size:18px;}
+#ftxt{font-family:'Share Tech Mono',monospace;font-size:14px;
+  color:rgba(223,246,240,0.6);letter-spacing:.02em;}
+
+/* ── Speed bar lateral ── */
+#spbar{position:fixed;left:0;top:72px;bottom:46px;width:4px;z-index:20;
+  background:rgba(255,255,255,.04);}
+#spfill{position:absolute;bottom:0;left:0;right:0;
+  background:linear-gradient(0deg,var(--cr),var(--cy),var(--c));
+  transition:height .6s ease;}
+
+/* ── Cam ── */
+#camw{position:fixed;bottom:44px;right:16px;z-index:30;
+  width:190px;height:140px;border-radius:8px;overflow:hidden;
+  border:1px solid var(--border);background:#000;}
+#camv{width:100%;height:100%;object-fit:cover;transform:scaleX(-1);display:block;}
+#camo{position:absolute;inset:0;pointer-events:none;}
+#cams{position:absolute;top:5px;left:7px;
+  font-family:'Share Tech Mono',monospace;font-size:8px;
+  color:var(--c);background:rgba(0,0,0,.6);padding:2px 5px;border-radius:2px;}
+
+/* ── Buttons top ── */
+#topbtns{position:fixed;top:8px;right:16px;z-index:30;display:flex;gap:8px;}
+.tbtn{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:.1em;
+  color:var(--muted);border:1px solid rgba(255,255,255,.1);background:transparent;
+  padding:4px 10px;border-radius:2px;cursor:pointer;transition:all .15s;}
+.tbtn:hover{color:var(--c);border-color:rgba(0,255,180,.3);}
+
+/* ── Flash ── */
+#flash{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  font-family:'Orbitron',monospace;font-weight:900;
+  font-size:clamp(32px,6vw,72px);pointer-events:none;z-index:100;
+  opacity:0;transition:opacity .08s;letter-spacing:.12em;
+  text-shadow:0 0 40px currentColor;}
+
+/* ── Overlay ── */
+#ov{position:fixed;inset:0;z-index:200;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:18px;
+  background:rgba(2,3,8,.96);backdrop-filter:blur(8px);}
+.ovlogo{font-family:'Orbitron',monospace;font-weight:900;
+  font-size:clamp(40px,7vw,72px);color:var(--c);letter-spacing:.18em;
+  text-shadow:0 0 30px rgba(0,255,180,.5),0 0 80px rgba(0,255,180,.2);}
+.ovsub{font-family:'Share Tech Mono',monospace;font-size:10px;
+  letter-spacing:.4em;color:var(--muted);}
+.ovmission{font-family:'Orbitron',monospace;font-weight:700;
+  font-size:clamp(13px,2vw,20px);color:var(--c);
+  background:rgba(0,255,180,.05);border:1px solid rgba(0,255,180,.15);
+  border-radius:4px;padding:16px 36px;text-align:center;line-height:1.9;
+  letter-spacing:.06em;}
+.schema{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;}
+.sbox{text-align:center;background:rgba(255,255,255,.03);
+  border:1px solid var(--border);border-radius:8px;padding:14px 18px;min-width:120px;}
+.sbox .si{font-size:30px;margin-bottom:6px;}
+.sbox .sl{font-family:'Share Tech Mono',monospace;font-size:8px;
+  color:var(--c);letter-spacing:.12em;text-transform:uppercase;margin-bottom:3px;}
+.sbox .sd{font-size:10px;color:var(--muted);line-height:1.5;}
+.ovstats{display:none;gap:12px;flex-wrap:wrap;justify-content:center;}
+.ostat{text-align:center;background:rgba(255,255,255,.03);
+  border:1px solid var(--border);border-radius:4px;padding:10px 16px;}
+.osv{font-family:'Share Tech Mono',monospace;font-size:22px;
+  color:var(--c);display:block;}
+.osl{font-size:9px;color:var(--muted);letter-spacing:.15em;text-transform:uppercase;}
+.btn{font-family:'Orbitron',monospace;font-size:12px;font-weight:700;
+  letter-spacing:.2em;color:var(--bg);background:var(--c);border:none;
+  border-radius:3px;padding:14px 48px;cursor:pointer;text-transform:uppercase;
+  box-shadow:0 0 24px rgba(0,255,180,.35);transition:all .15s;}
+.btn:hover{box-shadow:0 0 40px rgba(0,255,180,.55);transform:translateY(-1px);}
+.khint{font-family:'Share Tech Mono',monospace;font-size:9px;
+  color:var(--muted);letter-spacing:.1em;text-align:center;}
+
+/* word progress */
+#wordprog{position:fixed;bottom:44px;left:50%;transform:translateX(-50%);
+  z-index:20;display:none;align-items:center;gap:0;
+  background:rgba(2,3,8,.85);border:1px solid rgba(192,132,252,.3);
+  border-radius:6px;padding:10px 18px;}
+.wletter{width:32px;height:38px;display:flex;align-items:center;justify-content:center;
+  font-family:'Share Tech Mono',monospace;font-size:20px;font-weight:700;
+  border-bottom:2px solid rgba(192,132,252,.3);margin:0 2px;
+  color:rgba(192,132,252,.3);transition:all .25s;}
+.wletter.done{color:var(--cp);border-color:var(--cp);
+  text-shadow:0 0 10px rgba(192,132,252,.6);}
+</style>
+</head>
+<body>
+<div id="gbg"></div>
+<canvas id="gc"></canvas>
+
+<!-- HUD -->
+<div id="hud">
+  <div class="hb"><div class="hl">SCORE</div><div class="hv" id="hsc">000000</div></div>
+  <div class="hb"><div class="hl">NIV.</div><div class="hv" id="hlv">01</div></div>
+  <div class="hb"><div class="hl">COMBO</div><div class="hv" id="hco">×1</div></div>
+  <div class="hb"><div class="hl">VIES</div><div class="lrow" id="hlives"></div></div>
+  <div class="hb"><div class="hl">VITESSE</div><div class="hv" id="hsp">0.7×</div></div>
+  <div class="hb"><div class="hl">MODE</div><div class="hv" id="hmo" style="font-size:12px;color:var(--cy)">NUM</div></div>
+</div>
+
+<!-- Mission -->
+<div id="mbar">
+  <div id="mtxt">ATTRAPE LES MULTIPLES DE 2</div>
+  <div id="msub">Index pointé → curseur &nbsp;·&nbsp; Poing fermé → attraper</div>
+</div>
+
+<!-- Speed gauge -->
+<div id="spbar"><div id="spfill" style="height:4%"></div></div>
+
+<!-- Fact bar -->
+<div id="fbar"><span id="ficon">✦</span><span id="ftxt">Tends la main vers les bons tokens !</span></div>
+
+<!-- Cam -->
+<div id="camw">
+  <video id="camv" autoplay muted playsinline></video>
+  <canvas id="camo"></canvas>
+  <div id="cams">CAM OFF</div>
+</div>
+
+<!-- Top buttons -->
+<div id="topbtns">
+  <button class="tbtn" onclick="toggleFS()">⛶ PLEIN ÉCRAN</button>
+</div>
+
+<!-- Fact central -->
+<div id="factcenter">
+  <div id="fc-icon">✦</div>
+  <div id="fc-text">Attrape les bons nombres !</div>
+</div>
+
+<!-- Flash -->
+<div id="flash"></div>
+
+<!-- Word progress -->
+<div id="wordprog"></div>
+
+<!-- Overlay -->
+<div id="ov">
+  <div class="ovlogo">NUMFALL</div>
+  <div class="ovsub">PLUIE DE NOMBRES &amp; MOTS · CONTRÔLE PAR LES MAINS</div>
+  <div class="schema">
+    <div class="sbox"><div class="si">☝️</div><div class="sl">Index pointé</div><div class="sd">Déplace le curseur<br>sur les tokens</div></div>
+    <div class="sbox"><div class="si">✊</div><div class="sl">Poing fermé</div><div class="sd">Attrape le token<br>sous ta main</div></div>
+    <div class="sbox"><div class="si">✋</div><div class="sl">Paume ouverte</div><div class="sd">Efface le mot<br>en cours</div></div>
+  </div>
+  <div class="ovmission" id="ovmission">
+    OBJECTIF : ATTRAPE LES MULTIPLES DE 2<br>
+    <span style="font-size:11px;opacity:.55;font-family:'Share Tech Mono'">5 VIES · FORMES ET RÈGLES ÉVOLUENT · COMBOS = MULTIPLES PLUS DURS</span>
+  </div>
+  <div class="ovstats" id="ovstats">
+    <div class="ostat"><span class="osv" id="ovsc">—</span><span class="osl">Score</span></div>
+    <div class="ostat"><span class="osv" id="ovlv">—</span><span class="osl">Niveau max</span></div>
+    <div class="ostat"><span class="osv" id="ovco">—</span><span class="osl">Meilleur combo</span></div>
+    <div class="ostat"><span class="osv" id="ovmo">—</span><span class="osl">Mode final</span></div>
+  </div>
+  <button class="btn" id="startbtn">LANCER LA PARTIE</button>
+  <div class="khint" id="ovhint">Caméra en cours d'activation… · Souris / ← → / Espace aussi disponible</div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════
+   NUMFALL v4 — Engine
+═══════════════════════════════════════════════════ */
+const gc = document.getElementById('gc');
+const gctx = gc.getContext('2d');
+let W, H;
+const resize = () => { W = gc.width = window.innerWidth; H = gc.height = window.innerHeight; };
+window.addEventListener('resize', resize); resize();
+
+/* Fullscreen */
+const toggleFS = () => {
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+  else document.exitFullscreen();
+};
+document.addEventListener('fullscreenchange', () => {
+  document.querySelector('.tbtn').textContent = document.fullscreenElement ? '✕ QUITTER' : '⛶ PLEIN ÉCRAN';
+});
+
+/* ── Mémoire adaptative ── */
+const MK = 'numfall4';
+const loadMem = () => { try { return JSON.parse(sessionStorage.getItem(MK)) || defMem(); } catch { return defMem(); } };
+const saveMem = m => sessionStorage.setItem(MK, JSON.stringify(m));
+const defMem = () => ({ sessions: 0, avgSurvival: 1, avgLvl: 1, startSpd: 5.5, startMult: 0, best: 0 });
+let MEM = loadMem();
+
+/* ── Multiples ── */
+const MULTS = [
+  { n: 2,  label: 'MULTIPLES DE 2',        test: x => x % 2 === 0,              range: [2, 30] },
+  { n: 3,  label: 'MULTIPLES DE 3',        test: x => x % 3 === 0,              range: [3, 39] },
+  { n: 5,  label: 'MULTIPLES DE 5',        test: x => x % 5 === 0,              range: [5, 60] },
+  { n: 6,  label: 'MULTIPLES DE 2 ET 3',   test: x => x % 6 === 0,              range: [6, 60] },
+  { n: 7,  label: 'MULTIPLES DE 7',        test: x => x % 7 === 0,              range: [7, 77] },
+  { n: 4,  label: 'MULTIPLES DE 4',        test: x => x % 4 === 0,              range: [4, 64] },
+  { n: 11, label: 'MULTIPLES DE 11',       test: x => x % 11 === 0,             range: [11, 99] },
+  { n: 13, label: 'MULTIPLES DE 13',       test: x => x % 13 === 0,             range: [13, 91] },
+];
+
+/* ══════════════════════════════════════════════════════
+   FORMES SYMBOLIQUES — vocabulaire visuel du vivant
+   Chaque forme évoque la diversité, l'écologie,
+   l'immensité et la beauté du monde.
+══════════════════════════════════════════════════════ */
+
+// Séquence : les formes se diversifient avec la progression
+// On mélange les formes à partir du niveau 4 pour plus de variété
+const SHAPE_SEQ = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
+const getShapeIdx = lvl => {
+  // Niveaux bas : formes simples et douces. Niveaux hauts : toutes les formes mélangées
+  if (lvl < 3) return lvl; // cellule → flocon → feuille
+  return Math.floor(Math.random() * Math.min(SHAPE_SEQ.length, 4 + lvl));
+};
+
+/*
+  Catalogue des formes :
+  0  — cellule       (cercle organique avec membrane)     → origine de la vie
+  1  — flocon        (symétrie hexagonale)                → diversité, unicité
+  2  — feuille       (ovale avec nervure)                 → photosynthèse, écologie
+  3  — spirale       (logarithmique, coquillage)          → croissance, nature
+  4  — atome         (noyau + orbitales)                  → matière, physique
+  5  — goutte        (eau, larme inversée)                → eau, ressource vitale
+  6  — soleil        (étoile rayonnante irrégulière)      → énergie, lumière
+  7  — cristal       (double triangle, étoile de David)  → minéraux, structure
+  8  — fleur         (pétales arrondis)                   → biodiversité, beauté
+  9  — toile         (araignée, réseau)                   → interconnexion
+  10 — planète       (cercle + anneau elliptique)         → cosmos, immensité
+  11 — adn           (double hélice simplifiée)           → vie, code du vivant
+  12 — papillon      (ailes symétriques)                  → transformation, fragilité
+  13 — infini        (∞ stylisé)                         → immensité, continuité
+*/
+
+function drawShape(ctx, si, x, y, r, ang, frame) {
+  const f = frame || 0;
+  switch (si) {
+
+    case 0: { // ── Cellule ──
+      // Cercle organique avec légère déformation vivante
+      ctx.beginPath();
+      const pts = 18;
+      for (let i = 0; i <= pts; i++) {
+        const a = ang + (Math.PI * 2 / pts) * i;
+        const wobble = 1 + 0.08 * Math.sin(i * 2.3 + f * 0.04);
+        const px = x + r * wobble * Math.cos(a);
+        const py = y + r * wobble * Math.sin(a);
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      break;
+    }
+
+    case 1: { // ── Flocon (symétrie 6) ──
+      ctx.beginPath();
+      for (let arm = 0; arm < 6; arm++) {
+        const base = ang + (Math.PI / 3) * arm;
+        // Branche principale
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + r * Math.cos(base), y + r * Math.sin(base));
+        // Deux petites branches sur chaque bras
+        for (let b = 1; b <= 2; b++) {
+          const t = b / 3;
+          const bx = x + r * t * Math.cos(base), by = y + r * t * Math.sin(base);
+          const bl = r * 0.28;
+          ctx.moveTo(bx, by);
+          ctx.lineTo(bx + bl * Math.cos(base + Math.PI / 3), by + bl * Math.sin(base + Math.PI / 3));
+          ctx.moveTo(bx, by);
+          ctx.lineTo(bx + bl * Math.cos(base - Math.PI / 3), by + bl * Math.sin(base - Math.PI / 3));
+        }
+      }
+      break;
+    }
+
+    case 2: { // ── Feuille ──
+      ctx.beginPath();
+      const tip1x = x + r * Math.cos(ang - Math.PI / 2);
+      const tip1y = y + r * Math.sin(ang - Math.PI / 2);
+      const tip2x = x + r * Math.cos(ang + Math.PI / 2);
+      const tip2y = y + r * Math.sin(ang + Math.PI / 2);
+      const ctrl = r * 0.75;
+      ctx.moveTo(tip1x, tip1y);
+      ctx.bezierCurveTo(
+        x + ctrl * Math.cos(ang) + r * Math.cos(ang - Math.PI / 2) * 0.3, y + ctrl * Math.sin(ang) + r * Math.sin(ang - Math.PI / 2) * 0.3,
+        x + ctrl * Math.cos(ang) + r * Math.cos(ang + Math.PI / 2) * 0.3, y + ctrl * Math.sin(ang) + r * Math.sin(ang + Math.PI / 2) * 0.3,
+        tip2x, tip2y
+      );
+      ctx.bezierCurveTo(
+        x - ctrl * Math.cos(ang) + r * Math.cos(ang + Math.PI / 2) * 0.3, y - ctrl * Math.sin(ang) + r * Math.sin(ang + Math.PI / 2) * 0.3,
+        x - ctrl * Math.cos(ang) + r * Math.cos(ang - Math.PI / 2) * 0.3, y - ctrl * Math.sin(ang) + r * Math.sin(ang - Math.PI / 2) * 0.3,
+        tip1x, tip1y
+      );
+      ctx.closePath();
+      break;
+    }
+
+    case 3: { // ── Spirale (coquillage) ──
+      ctx.beginPath();
+      const turns = 2.5;
+      const steps = 80;
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const a = ang + t * Math.PI * 2 * turns;
+        const rr = r * 0.15 + r * 0.85 * t;
+        const px = x + rr * Math.cos(a), py = y + rr * Math.sin(a);
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      }
+      break;
+    }
+
+    case 4: { // ── Atome ──
+      // Noyau
+      ctx.beginPath(); ctx.arc(x, y, r * 0.18, 0, Math.PI * 2);
+      // Orbitales elliptiques (3 axes)
+      ctx.closePath();
+      // On dessine les 3 ellipses séparément après le stroke principal
+      break;
+    }
+
+    case 5: { // ── Goutte d'eau ──
+      ctx.beginPath();
+      const tipX = x + r * Math.cos(ang - Math.PI / 2);
+      const tipY = y + r * Math.sin(ang - Math.PI / 2);
+      const baseX = x + r * 0.55 * Math.cos(ang + Math.PI / 2);
+      const baseY = y + r * 0.55 * Math.sin(ang + Math.PI / 2);
+      ctx.moveTo(tipX, tipY);
+      ctx.bezierCurveTo(
+        x + r * 0.7 * Math.cos(ang), y + r * 0.7 * Math.sin(ang),
+        x + r * 0.65 * Math.cos(ang + Math.PI * 0.75), y + r * 0.65 * Math.sin(ang + Math.PI * 0.75),
+        baseX, baseY
+      );
+      ctx.bezierCurveTo(
+        x + r * 0.65 * Math.cos(ang - Math.PI * 0.75), y + r * 0.65 * Math.sin(ang - Math.PI * 0.75),
+        x + r * 0.7 * Math.cos(ang + Math.PI), y + r * 0.7 * Math.sin(ang + Math.PI),
+        tipX, tipY
+      );
+      ctx.closePath();
+      break;
+    }
+
+    case 6: { // ── Soleil rayonnant ──
+      ctx.beginPath();
+      const rays = 12;
+      for (let i = 0; i < rays * 2; i++) {
+        const a = ang + (Math.PI / rays) * i;
+        const rr = i % 2 === 0 ? r : r * (0.55 + 0.1 * Math.sin(i * 1.7 + f * 0.03));
+        const px = x + rr * Math.cos(a), py = y + rr * Math.sin(a);
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      break;
+    }
+
+    case 7: { // ── Cristal (étoile de David) ──
+      ctx.beginPath();
+      // Triangle 1
+      for (let i = 0; i < 3; i++) {
+        const a = ang + (Math.PI * 2 / 3) * i - Math.PI / 2;
+        i === 0 ? ctx.moveTo(x + r * Math.cos(a), y + r * Math.sin(a))
+                : ctx.lineTo(x + r * Math.cos(a), y + r * Math.sin(a));
+      }
+      ctx.closePath();
+      ctx.moveTo(x + r * Math.cos(ang + Math.PI / 2), y + r * Math.sin(ang + Math.PI / 2));
+      // Triangle 2 (inversé)
+      for (let i = 0; i < 3; i++) {
+        const a = ang + (Math.PI * 2 / 3) * i + Math.PI / 2;
+        i === 0 ? ctx.moveTo(x + r * Math.cos(a), y + r * Math.sin(a))
+                : ctx.lineTo(x + r * Math.cos(a), y + r * Math.sin(a));
+      }
+      ctx.closePath();
+      break;
+    }
+
+    case 8: { // ── Fleur (5 pétales) ──
+      ctx.beginPath();
+      const petals = 6;
+      for (let p = 0; p < petals; p++) {
+        const pa = ang + (Math.PI * 2 / petals) * p;
+        const cx1 = x + r * 0.5 * Math.cos(pa - 0.5) + r * 0.6 * Math.cos(pa);
+        const cy1 = y + r * 0.5 * Math.sin(pa - 0.5) + r * 0.6 * Math.sin(pa);
+        const cx2 = x + r * 0.5 * Math.cos(pa + 0.5) + r * 0.6 * Math.cos(pa);
+        const cy2 = y + r * 0.5 * Math.sin(pa + 0.5) + r * 0.6 * Math.sin(pa);
+        if (p === 0) ctx.moveTo(x, y);
+        ctx.bezierCurveTo(cx1, cy1, cx2, cy2, x, y);
+      }
+      ctx.closePath();
+      break;
+    }
+
+    case 9: { // ── Toile (réseau) ──
+      // Cercles concentriques + rayons = toile d'araignée
+      ctx.beginPath();
+      const spokes = 8;
+      for (let i = 0; i < spokes; i++) {
+        const a = ang + (Math.PI * 2 / spokes) * i;
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + r * Math.cos(a), y + r * Math.sin(a));
+      }
+      // Anneaux
+      for (let ring = 1; ring <= 3; ring++) {
+        ctx.moveTo(x + r * (ring / 3) * Math.cos(ang), y + r * (ring / 3) * Math.sin(ang));
+        for (let i = 1; i <= spokes; i++) {
+          const a = ang + (Math.PI * 2 / spokes) * i;
+          ctx.lineTo(x + r * (ring / 3) * Math.cos(a), y + r * (ring / 3) * Math.sin(a));
+        }
+      }
+      break;
+    }
+
+    case 10: { // ── Planète (cercle + anneau) ──
+      ctx.beginPath();
+      ctx.arc(x, y, r * 0.62, 0, Math.PI * 2);
+      ctx.closePath();
+      // Anneau elliptique dessiné séparément (voir drawToken)
+      break;
+    }
+
+    case 11: { // ── ADN (double hélice) ──
+      ctx.beginPath();
+      const steps2 = 20;
+      // Brin gauche
+      for (let i = 0; i <= steps2; i++) {
+        const t = (i / steps2) * Math.PI * 2;
+        const px = x - r * 0.35 * Math.cos(t + ang) + r * 0.18 * Math.sin(t * 2 + ang);
+        const py = y - r + (r * 2 * i / steps2);
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      }
+      // Brin droit
+      ctx.moveTo(x, y - r);
+      for (let i = 0; i <= steps2; i++) {
+        const t = (i / steps2) * Math.PI * 2;
+        const px = x + r * 0.35 * Math.cos(t + ang) - r * 0.18 * Math.sin(t * 2 + ang);
+        const py = y - r + (r * 2 * i / steps2);
+        ctx.lineTo(px, py);
+      }
+      // Barreaux
+      for (let i = 0; i <= 4; i++) {
+        const t = (i / 4) * Math.PI * 2;
+        const py = y - r + (r * 2 * i / 4);
+        const lx = x - r * 0.35 * Math.cos(t + ang);
+        const rx = x + r * 0.35 * Math.cos(t + ang);
+        ctx.moveTo(lx, py); ctx.lineTo(rx, py);
+      }
+      break;
+    }
+
+    case 12: { // ── Papillon (ailes) ──
+      ctx.beginPath();
+      const wa = ang;
+      // Aile gauche haut
+      ctx.moveTo(x, y);
+      ctx.bezierCurveTo(x - r * 0.3, y - r * 1.1, x - r * 1.1, y - r * 0.7, x - r, y);
+      ctx.bezierCurveTo(x - r * 0.9, y + r * 0.3, x - r * 0.2, y + r * 0.2, x, y);
+      // Aile droite
+      ctx.moveTo(x, y);
+      ctx.bezierCurveTo(x + r * 0.3, y - r * 1.1, x + r * 1.1, y - r * 0.7, x + r, y);
+      ctx.bezierCurveTo(x + r * 0.9, y + r * 0.3, x + r * 0.2, y + r * 0.2, x, y);
+      break;
+    }
+
+    case 13: { // ── Infini (∞) ──
+      ctx.beginPath();
+      const w = r * 1.1, h = r * 0.5;
+      // Lemniscate de Bernoulli
+      const npts = 80;
+      for (let i = 0; i <= npts; i++) {
+        const t = (i / npts) * Math.PI * 2;
+        const scale = 1 / (1 + Math.sin(t) * Math.sin(t));
+        const lx = x + w * Math.cos(t) * scale;
+        const ly = y + h * Math.sin(t) * Math.cos(t) * scale;
+        // Rotation selon ang
+        const rx2 = x + (lx - x) * Math.cos(ang) - (ly - y) * Math.sin(ang);
+        const ry2 = y + (lx - x) * Math.sin(ang) + (ly - y) * Math.cos(ang);
+        i === 0 ? ctx.moveTo(rx2, ry2) : ctx.lineTo(rx2, ry2);
+      }
+      ctx.closePath();
+      break;
+    }
+
+    default: { // fallback cercle
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+    }
+  }
+}
+
+// Détails supplémentaires dessinés par-dessus pour certaines formes
+function drawShapeExtras(ctx, si, x, y, r, ang, col, glow) {
+  switch(si) {
+    case 4: { // Atome — orbitales
+      for (let i = 0; i < 3; i++) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(ang + (Math.PI / 3) * i);
+        ctx.beginPath();
+        ctx.ellipse(0, 0, r, r * 0.35, 0, 0, Math.PI * 2);
+        ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.globalAlpha *= 0.7; ctx.stroke();
+        ctx.restore();
+      }
+      break;
+    }
+    case 10: { // Planète — anneau
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(ang + 0.4);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, r * 1.45, r * 0.38, 0, 0, Math.PI * 2);
+      ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+      ctx.globalAlpha *= 0.6; ctx.stroke();
+      ctx.restore();
+      break;
+    }
+    case 2: { // Feuille — nervure centrale
+      ctx.save();
+      ctx.strokeStyle = col; ctx.lineWidth = 0.8; ctx.globalAlpha *= 0.55;
+      ctx.beginPath();
+      ctx.moveTo(x + r * Math.cos(ang - Math.PI / 2), y + r * Math.sin(ang - Math.PI / 2));
+      ctx.lineTo(x + r * Math.cos(ang + Math.PI / 2), y + r * Math.sin(ang + Math.PI / 2));
+      ctx.stroke();
+      // Nervures latérales
+      for (let i = 1; i <= 3; i++) {
+        const t = i / 4;
+        const bx = x + (r * (t * 2 - 1)) * Math.cos(ang + Math.PI / 2);
+        const by = y + (r * (t * 2 - 1)) * Math.sin(ang + Math.PI / 2);
+        ctx.beginPath(); ctx.moveTo(bx, by);
+        ctx.lineTo(bx + r * 0.35 * Math.cos(ang), by + r * 0.35 * Math.sin(ang));
+        ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(bx, by);
+        ctx.lineTo(bx - r * 0.35 * Math.cos(ang), by - r * 0.35 * Math.sin(ang));
+        ctx.stroke();
+      }
+      ctx.restore();
+      break;
+    }
+  }
+}
+
+/* ── Mots ── vocabulaire positif, monde, nature, cosmos */
+const WORDSETS = [
+  ['MER', 'ARBRE', 'LUNE', 'VENT', 'VIE'],
+  ['FORET', 'OCEAN', 'SOLEIL', 'GRAINE', 'NUAGE'],
+  ['BALEINE', 'ETOILE', 'COLIBRI', 'RACINE', 'AURORE'],
+  ['DIVERSITE', 'SYMBIOSE', 'PLANETE', 'LUMIERE', 'OXYGENE'],
+  ['BIODIVERSITE', 'PHOTOSYNTHESE', 'CONSTELLATION', 'ECOSYSTEME'],
+];
+
+/* ── État ── */
+let gstate = 'idle', gframe = 0;
+let score = 0, lives = 5, combo = 0, maxCombo = 1;
+let lvl = 0, multIdx = 0, curSpd = 5.5;
+let correctStreak = 0, sessionMaxLvl = 0;
+let blind = false; // false | 'dim' | 'full'
+let mode = 'num'; // 'num' | 'word'
+let wordTarget = '', wordBuilt = '';
+let drops = [], particles = [], floats = [];
+let spawnT = 0, gameStart = 0;
+
+/* hands — deux mains indépendantes, position lissée sur lm9 */
+const SMOOTH = 0.18;
+// Main 0 et Main 1 (peu importe gauche/droite)
+let hands2 = [
+  { x: -999, y: -999, rawX: -999, rawY: -999, fist: false, open: false, visible: false, prevFist: false },
+  { x: -999, y: -999, rawX: -999, rawY: -999, fist: false, open: false, visible: false, prevFist: false },
+];
+// Alias rétrocompat pour le curseur souris
+let hvisible = false;
+let camActive = false;
+/* mouse fallback */
+let mx = -999, my = -999;
+
+/* ── Helpers couleurs ── */
+function tColor(isT) {
+  // Aveugle dès le 2e combo — plus de couleurs indicatrices rapidement
+  if (combo >= 2 || blind) return 'rgba(200,215,230,0.55)';
+  return isT ? '#00ffb4' : '#ff2d6b';
+}
+function tGlow(isT) {
+  if (combo >= 2 || blind) return 'rgba(200,215,230,0.12)';
+  return isT ? 'rgba(0,255,180,0.45)' : 'rgba(255,45,107,0.38)';
+}
+
+/* ── Multiples courants ── */
+const mc = () => MULTS[multIdx % MULTS.length];
+const isTarget = n => mc().test(n);
+function randN() {
+  const [lo, hi] = mc().range;
+  return lo + Math.floor(Math.random() * (hi - lo + 1));
+}
+
+/* ── Difficulté ── */
+function adjustBlind() {
+  if (lvl >= 10) blind = 'full';
+  else if (lvl >= 6) blind = 'dim';
+  else blind = false;
+}
+
+function checkMultChange() {
+  // Change de multiple tous les 6 combos
+  if (combo > 0 && combo % 6 === 0) {
+    const next = multIdx + 1;
+    if (next < MULTS.length) {
+      multIdx = next;
+      doFlash('MULTIPLE → ' + mc().n + ' !', '#ffe033');
+      updateMissionUI();
+    }
+  }
+  // Monte de niveau tous les 4 bonnes réponses consécutives
+  if (correctStreak > 0 && correctStreak % 4 === 0) {
+    lvl = Math.min(20, lvl + 1);
+    sessionMaxLvl = Math.max(sessionMaxLvl, lvl);
+    adjustBlind();
+    if (lvl > 1 && lvl % 3 === 0 && mode === 'num' && Math.random() < 0.55) {
+      triggerWordMode();
+    }
+    updateHUD();
+  }
+}
+
+/* ── Spawn drops ── */
+function spawnNum() {
+  const isT = Math.random() < 0.44;
+  let n, tries = 0;
+  if (isT) { do { n = randN(); tries++; } while (!isTarget(n) && tries < 50); }
+  else { do { n = randN(); tries++; } while (isTarget(n) && tries < 50); }
+  if (isT !== isTarget(n)) return;
+
+  const si = getShapeIdx(lvl);
+  const spd = curSpd * (0.82 + Math.random() * 0.36);
+  const marginX = W * 0.18; // 18% de marge de chaque côté — zone atteignable par les mains
+  drops.push({
+    kind: 'num', x: marginX + Math.random() * (W - marginX * 2), y: -42,
+    val: n, isT, spd, si, ang: Math.random() * Math.PI * 2,
+    r: 24 + Math.min(lvl, 8) * 0.6,
+    col: tColor(isT), glow: tGlow(isT),
+    trail: [], wp: Math.random() * Math.PI * 2,
+    alpha: 1, caught: false, missed: false,
+  });
+}
+
+function spawnLetters() {
+  const needed = wordTarget[wordBuilt.length];
+  if (!needed) return;
+  const abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const pool = [needed];
+  let attempts = 0;
+  while (pool.length < Math.min(3 + Math.floor(lvl / 2), 7) && attempts < 50) {
+    const l = abc[Math.floor(Math.random() * 26)];
+    if (!pool.includes(l)) pool.push(l);
+    attempts++;
+  }
+  // Shuffle
+  for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+
+  const si = getShapeIdx(lvl);
+  pool.forEach(l => {
+    const isT = l === needed;
+    const spd = curSpd * 0.78 * (0.8 + Math.random() * 0.4);
+    const marginX = W * 0.18;
+    drops.push({
+      kind: 'letter', x: marginX + Math.random() * (W - marginX * 2), y: -42,
+      val: l, isT, spd, si, ang: Math.random() * Math.PI * 2,
+      r: 28 + Math.min(lvl, 6) * 0.5,
+      col: isT ? '#c084fc' : tColor(false),
+      glow: isT ? 'rgba(192,132,252,0.4)' : tGlow(false),
+      trail: [], wp: Math.random() * Math.PI * 2,
+      alpha: 1, caught: false, missed: false,
+    });
+  });
+}
+
+/* ── Mode mot ── */
+function triggerWordMode() {
+  mode = 'word';
+  const set = WORDSETS[Math.min(Math.floor(lvl / 3), WORDSETS.length - 1)];
+  wordTarget = set[Math.floor(Math.random() * set.length)];
+  wordBuilt = '';
+  drops = [];
+  buildWordProg();
+  updateMissionUI();
+  doFlash('MODE LETTRES', '#c084fc');
+}
+
+function buildWordProg() {
+  const wp = document.getElementById('wordprog');
+  wp.style.display = 'flex';
+  wp.innerHTML = '';
+  for (let i = 0; i < wordTarget.length; i++) {
+    const d = document.createElement('div');
+    d.className = 'wletter' + (i < wordBuilt.length ? ' done' : '');
+    d.textContent = i < wordBuilt.length ? wordBuilt[i] : wordTarget[i];
+    wp.appendChild(d);
+  }
+}
+
+function returnToNumMode() {
+  mode = 'num';
+  drops = [];
+  document.getElementById('wordprog').style.display = 'none';
+  updateMissionUI();
+  doFlash('MODE NOMBRES', '#00ffb4');
+}
+
+/* ── Grab ── */
+const GRAB_R = 50;
+function tryGrab(px, py) {
+  let best = null, bd = Infinity;
+  drops.forEach(d => {
+    if (d.caught || d.missed) return;
+    const dist = Math.hypot(d.x - px, d.y - py);
+    if (dist < d.r + GRAB_R && dist < bd) { bd = dist; best = d; }
+  });
+  if (!best) return;
+  best.caught = true;
+  if (best.isT) onGood(best); else onBad(best);
+}
+
+function onGood(d) {
+  combo++; maxCombo = Math.max(maxCombo, combo); correctStreak++;
+  const pts = 10 * Math.max(1, combo);
+  score += pts;
+  // Accélère uniquement sur bonne réponse
+  curSpd = Math.min(4.5, curSpd + 0.022 + lvl * 0.003);
+  checkMultChange();
+  burst(d.x, d.y, d.kind === 'letter' ? '#c084fc' : '#00ffb4', 16);
+  floatAdd(d.x, d.y - 28, `+${pts}`, d.kind === 'letter' ? '#c084fc' : '#00ffb4');
+  if (d.kind === 'letter') {
+    wordBuilt += d.val;
+    buildWordProg();
+    if (wordBuilt === wordTarget) {
+      score += 200;
+      lives = Math.min(5, lives + 1);
+      burst(W / 2, H / 2, '#c084fc', 30);
+      doFlash('MOT ! +VIE', '#c084fc');
+      showFact(nextFact());
+      setTimeout(returnToNumMode, 1800);
+    }
+  } else {
+    showFact(nextFact());
+  }
+  updateHUD();
+}
+
+function onBad(d) {
+  combo = 0; correctStreak = Math.max(0, correctStreak - 2);
+  lives--;
+  // Vitesse ne change pas sur erreur
+  burst(d.x, d.y, '#ff2d6b', 10);
+  floatAdd(d.x, d.y - 28, '✕', '#ff2d6b');
+  updateHUD();
+  if (lives <= 0) setTimeout(endGame, 350);
+}
+
+function onMissedTarget(d) {
+  if (!d.isT) return;
+  combo = Math.max(0, combo - 1);
+  lives--;
+  floatAdd(d.x, H * 0.82, 'MANQUÉ', 'rgba(255,45,107,0.7)');
+  updateHUD();
+  if (lives <= 0) setTimeout(endGame, 350);
+}
+
+/* ── Particules ── */
+function burst(x, y, col, n) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, s = 2.5 + Math.random() * 5;
+    particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 2.5, alpha: 1, col, r: 2 + Math.random() * 3 });
+  }
+}
+function floatAdd(x, y, txt, col) { floats.push({ x, y, txt, col, alpha: 1, vy: -1.6 }); }
+
+/* ── Facts — émerveillement, écologie, cosmos ── */
+const FACTS = [
+  { i: '🌊', t: 'L\'océan produit 50% de l\'oxygène que tu respires — la mer est tes poumons !' },
+  { i: '🌳', t: 'Un arbre peut vivre 5 000 ans. Certains ont vu naître les premières civilisations.' },
+  { i: '🐋', t: 'Le chant d\'une baleine bleue voyage à 800 km. La mer est un orchestre immense.' },
+  { i: '🦋', t: 'Un papillon se souvient de sa vie de chenille — la mémoire traverse la métamorphose !' },
+  { i: '🌱', t: 'Une graine de séquoia tient dans ta paume et peut devenir l\'être vivant le plus grand du monde.' },
+  { i: '⭐', t: 'Chaque atome de fer dans ton sang a été forgé dans une étoile mourante il y a 4 milliards d\'ans.' },
+  { i: '🐝', t: '60 000 abeilles = une ruche. Et ensemble elles décident à la majorité où elles déménagent !' },
+  { i: '🌍', t: 'La Terre a 4,5 milliards d\'ans. Toute l\'histoire humaine = les 5 dernières secondes d\'une journée.' },
+  { i: '🧬', t: 'Ton ADN déplié mesurerait 2 mètres. Chaque cellule de ton corps porte ton histoire complète.' },
+  { i: '🌺', t: 'Les fleurs et les abeilles ont co-évolué pendant 130 millions d\'ans — une amitié très ancienne.' },
+  { i: '🌙', t: 'Sans la Lune, nos jours dureraient 8h et la vie telle qu\'on la connaît n\'existerait pas.' },
+  { i: '🦑', t: 'La pieuvre possède 3 cœurs, 9 cerveaux et peut modifier sa peau en millisecondes.' },
+  { i: '🌿', t: 'Les arbres d\'une forêt communiquent par leurs racines — on appelle ça le "wood wide web".' },
+  { i: '🔭', t: 'Il y a plus d\'étoiles dans l\'univers que de grains de sable sur toutes les plages de la Terre.' },
+  { i: '🐬', t: 'Les dauphins s\'appellent par leur prénom — chacun a un sifflement unique pour se présenter.' },
+  { i: '🌈', t: '7 couleurs, 7 milliards de nuances — aucun humain ne voit exactement les mêmes couleurs.' },
+  { i: '🍄', t: 'Le plus grand être vivant de la planète est un champignon de 8 km² dans l\'Oregon !' },
+  { i: '💧', t: 'L\'eau que tu bois a peut-être traversé les dinosaures — elle circule depuis 4 milliards d\'ans.' },
+  { i: '🦎', t: 'Les forêts tropicales couvrent 6% des terres mais abritent 50% de toutes les espèces vivantes.' },
+  { i: '☀️', t: 'La lumière du soleil met 8 minutes pour te toucher. Quand tu la ressens, elle est déjà du passé.' },
+];
+let usedF = [];
+function nextFact() {
+  if (usedF.length >= FACTS.length) usedF = [];
+  const av = FACTS.filter((_, i) => !usedF.includes(i));
+  const f = av[Math.floor(Math.random() * av.length)];
+  usedF.push(FACTS.indexOf(f));
+  return f;
+}
+let factTimer = null;
+function showFact(f) {
+  // Barre basse : conseil permanent
+  document.getElementById('ficon').textContent = f.i;
+  document.getElementById('ftxt').textContent = f.t;
+  // Centre : apparaît 4 secondes
+  const el = document.getElementById('factcenter');
+  document.getElementById('fc-icon').textContent = f.i;
+  document.getElementById('fc-text').textContent = f.t;
+  el.classList.add('show');
+  if (factTimer) clearTimeout(factTimer);
+  factTimer = setTimeout(() => el.classList.remove('show'), 4000);
+}
+
+/* ── HUD ── */
+function updateHUD() {
+  document.getElementById('hsc').textContent = String(score).padStart(6, '0');
+  document.getElementById('hlv').textContent = String(lvl + 1).padStart(2, '0');
+  document.getElementById('hco').textContent = '×' + Math.max(1, combo);
+  document.getElementById('hsp').textContent = curSpd.toFixed(1) + '×';
+  document.getElementById('hmo').textContent = mode === 'word' ? 'MOT' : 'NUM';
+  document.getElementById('hmo').style.color = mode === 'word' ? '#c084fc' : '#ffe033';
+  const lr = document.getElementById('hlives'); lr.innerHTML = '';
+  for (let i = 0; i < 5; i++) { const d = document.createElement('div'); d.className = 'ld' + (i >= lives ? ' off' : ''); lr.appendChild(d); }
+  const pct = Math.min(100, ((curSpd - 0.65) / 3.85) * 100);
+  document.getElementById('spfill').style.height = pct + '%';
+  updateMissionUI();
+}
+
+function updateMissionUI() {
+  let txt = '';
+  if (mode === 'num') {
+    txt = 'ATTRAPE LES ' + mc().label;
+    if (blind === 'dim') txt += ' <span class="mbadge">INDICES RÉDUITS</span>';
+    if (blind === 'full') txt += ' <span class="mbadge">MODE AVEUGLE</span>';
+  } else {
+    txt = 'FORME LE MOT : <span style="color:#c084fc;letter-spacing:.2em">' + wordTarget + '</span>';
+  }
+  document.getElementById('mtxt').innerHTML = txt;
+  const shape = ['CERCLE', 'HEXAGONE', 'CARRÉ', 'TRIANGLE', 'ÉTOILE 5', 'ÉTOILE 6', 'LOSANGE', 'GLITCH'][getShapeIdx(lvl)];
+  document.getElementById('msub').textContent = mode === 'num'
+    ? `Forme : ${shape} · Ferme la main pour attraper · Vitesse auto sur bonne réponse`
+    : `Attrape la bonne lettre · Paume ouverte = effacer · Mot : ${wordBuilt || '—'}`;
+}
+
+/* ── Flash ── */
+function doFlash(txt, col = '#00ffb4') {
+  const el = document.getElementById('flash');
+  el.textContent = txt; el.style.color = col; el.style.opacity = '1';
+  setTimeout(() => { el.style.opacity = '0'; }, 1100);
+}
+
+/* ── Dessin des tokens ── */
+function drawToken(d) {
+  gctx.save();
+  gctx.globalAlpha = d.alpha;
+
+  // Trail
+  d.trail.forEach(t => {
+    gctx.save(); gctx.globalAlpha = d.alpha * t.a * 0.22;
+    gctx.beginPath(); gctx.arc(t.x, t.y, d.r * 0.35, 0, Math.PI * 2);
+    gctx.fillStyle = d.glow; gctx.fill(); gctx.restore();
+  });
+
+  // Halo doux
+  const g = gctx.createRadialGradient(d.x, d.y, 0, d.x, d.y, d.r * 2.4);
+  g.addColorStop(0, d.glow); g.addColorStop(1, 'rgba(0,0,0,0)');
+  gctx.beginPath(); gctx.arc(d.x, d.y, d.r * 2.4, 0, Math.PI * 2);
+  gctx.fillStyle = g; gctx.fill();
+
+  // Fond sombre centré — assez grand pour être lisible, pas trop pour ne pas cacher le contour
+  gctx.save();
+  gctx.beginPath(); gctx.arc(d.x, d.y, d.r * 0.72, 0, Math.PI * 2);
+  gctx.fillStyle = 'rgba(2,3,8,0.88)'; gctx.fill();
+  gctx.restore();
+
+  // Contour lumineux (forme autour, pas par-dessus le texte)
+  gctx.save();
+  drawShape(gctx, d.si, d.x, d.y, d.r, d.ang, gframe);
+  gctx.strokeStyle = d.col; gctx.lineWidth = 1.6;
+  gctx.shadowBlur = 10; gctx.shadowColor = d.col;
+  gctx.stroke(); gctx.shadowBlur = 0;
+  gctx.restore();
+
+  // Détails supplémentaires (nervures, anneaux, orbitales)
+  gctx.save();
+  drawShapeExtras(gctx, d.si, d.x, d.y, d.r, d.ang, d.col, d.glow);
+  gctx.restore();
+
+  // Numéro / lettre au centre
+  const fs = d.kind === 'letter' ? d.r * 1.0 : d.r * 0.85;
+  gctx.fillStyle = d.col;
+  gctx.font = `700 ${fs}px 'Share Tech Mono',monospace`;
+  gctx.textAlign = 'center'; gctx.textBaseline = 'middle';
+  gctx.shadowBlur = 6; gctx.shadowColor = d.col;
+  gctx.fillText(d.val, d.x, d.y + 1);
+  gctx.shadowBlur = 0;
+
+  // Rotation — lente et organique
+  d.ang += 0.005 + lvl * 0.001;
+  gctx.restore();
+}
+
+/* ── Curseur main(s) ── */
+function drawCursor() {
+  // Mains caméra
+  if (camActive) {
+    hands2.forEach(h => {
+      if (!h.visible || h.x < 0) return;
+      drawHandCircle(h.x, h.y, h.fist);
+    });
+  }
+  // Souris fallback
+  if (!camActive && mx >= 0) drawHandCircle(mx, my, false);
+}
+
+function drawHandCircle(x, y, fist) {
+  gctx.save();
+  gctx.beginPath(); gctx.arc(x, y, GRAB_R, 0, Math.PI * 2);
+  gctx.setLineDash([4, 5]);
+  gctx.strokeStyle = fist ? 'rgba(255,224,51,0.6)' : 'rgba(0,255,180,0.3)';
+  gctx.lineWidth = 1.5; gctx.stroke(); gctx.setLineDash([]);
+  const gr = gctx.createRadialGradient(x, y, 0, x, y, GRAB_R);
+  gr.addColorStop(0, fist ? 'rgba(255,224,51,0.2)' : 'rgba(0,255,180,0.1)');
+  gr.addColorStop(1, 'rgba(0,0,0,0)');
+  gctx.beginPath(); gctx.arc(x, y, GRAB_R, 0, Math.PI * 2);
+  gctx.fillStyle = gr; gctx.fill();
+  gctx.beginPath(); gctx.arc(x, y, fist ? 10 : 5, 0, Math.PI * 2);
+  gctx.fillStyle = fist ? '#ffe033' : '#00ffb4';
+  gctx.shadowBlur = 14; gctx.shadowColor = fist ? '#ffe033' : '#00ffb4';
+  gctx.fill(); gctx.shadowBlur = 0;
+  if (!fist) {
+    gctx.strokeStyle = 'rgba(0,255,180,0.5)'; gctx.lineWidth = 1;
+    gctx.beginPath(); gctx.moveTo(x - 16, y); gctx.lineTo(x + 16, y); gctx.stroke();
+    gctx.beginPath(); gctx.moveTo(x, y - 16); gctx.lineTo(x, y + 16); gctx.stroke();
+  }
+  gctx.restore();
+}
+
+/* ── Boucle principale ── */
+function loop() {
+  requestAnimationFrame(loop);
+  if (gstate !== 'playing') return;
+  gframe++;
+
+  // Spawn — dense dès le départ
+  const si = Math.max(6, 30 - lvl * 2);
+  spawnT++;
+  if (spawnT >= si) {
+    spawnT = 0;
+    if (mode === 'num') spawnNum();
+    else if (drops.filter(d => !d.caught && !d.missed).length < 5) spawnLetters();
+  }
+
+  // Fond
+  gctx.clearRect(0, 0, W, H);
+  gctx.fillStyle = 'rgba(2,3,8,0.18)'; gctx.fillRect(0, 0, W, H);
+  for (let y = 0; y < H; y += 95) {
+    const yy = (y + gframe * 0.22) % H;
+    gctx.fillStyle = `rgba(0,255,180,${0.008 + Math.sin(gframe * 0.012 + y * 0.07) * 0.004})`;
+    gctx.fillRect(0, yy, W, 1);
+  }
+
+  const botY = H - 46;
+
+  // Update + draw drops
+  drops.forEach(d => {
+    if (d.caught || d.missed) return;
+    d.x += Math.sin(gframe * 0.035 + d.wp) * 0.4;
+    d.y += d.spd;
+    d.trail.push({ x: d.x, y: d.y, a: 0.55 });
+    if (d.trail.length > 8) d.trail.shift();
+    d.trail.forEach(t => t.a *= 0.8);
+    if (d.y - d.r > botY) { d.missed = true; onMissedTarget(d); return; }
+    drawToken(d);
+  });
+  drops = drops.filter(d => !(d.missed || (d.caught && d.y > H + 60)));
+
+  // Position directe — pas de lissage (sensation franche)
+  hands2.forEach(h => {
+    if (h.visible && h.rawX > 0) { h.x = h.rawX; h.y = h.rawY; }
+    if (camActive && h.fist && !h.prevFist && h.visible) tryGrab(h.x, h.y);
+    h.prevFist = h.fist;
+  });
+  hvisible = hands2.some(h => h.visible);
+
+  // Particules
+  particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += 0.12; p.alpha -= 0.027; });
+  particles = particles.filter(p => p.alpha > 0);
+  particles.forEach(p => {
+    gctx.save(); gctx.globalAlpha = p.alpha;
+    gctx.beginPath(); gctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    gctx.fillStyle = p.col; gctx.fill(); gctx.restore();
+  });
+
+  // Floats
+  floats.forEach(f => { f.y += f.vy; f.alpha -= 0.02; });
+  floats = floats.filter(f => f.alpha > 0);
+  floats.forEach(f => {
+    gctx.save(); gctx.globalAlpha = f.alpha;
+    gctx.font = "700 20px 'Share Tech Mono',monospace";
+    gctx.textAlign = 'center'; gctx.textBaseline = 'middle';
+    gctx.fillStyle = f.col; gctx.fillText(f.txt, f.x, f.y); gctx.restore();
+  });
+
+  drawCursor();
+}
+loop();
+
+/* ── Game over ── */
+function endGame() {
+  gstate = 'over';
+  const sr = lives / 5;
+  MEM.sessions++;
+  MEM.avgSurvival = (MEM.avgSurvival * (MEM.sessions - 1) + sr) / MEM.sessions;
+  MEM.avgLvl = (MEM.avgLvl * (MEM.sessions - 1) + (lvl + 1)) / MEM.sessions;
+  MEM.best = Math.max(MEM.best, score);
+  const fast = (Date.now() - gameStart) < 20000 && lives === 0;
+  if (MEM.sessions >= 2) {
+    if (fast && MEM.avgSurvival < 0.25) { MEM.startSpd = Math.max(0.55, MEM.startSpd - 0.08); MEM.startMult = Math.max(0, MEM.startMult - 1); }
+    else if (MEM.avgSurvival > 0.55 && sessionMaxLvl >= 5) { MEM.startSpd = Math.min(1.3, MEM.startSpd + 0.07); MEM.startMult = Math.min(2, MEM.startMult + 1); }
+    else if (MEM.avgSurvival > 0.35) MEM.startSpd = Math.min(1.1, MEM.startSpd + 0.03);
+  }
+  saveMem(MEM);
+  document.getElementById('ovsc').textContent = String(score).padStart(6, '0');
+  document.getElementById('ovlv').textContent = sessionMaxLvl + 1;
+  document.getElementById('ovco').textContent = '×' + maxCombo;
+  document.getElementById('ovmo').textContent = mode === 'word' ? 'MOT' : 'NUM';
+  document.getElementById('ovstats').style.display = 'flex';
+  document.getElementById('ovmission').innerHTML = score >= MEM.best
+    ? `RECORD PERSONNEL !<br><span style="font-size:11px;opacity:.55;font-family:'Share Tech Mono'">SCORE : ${score}</span>`
+    : `PARTIE TERMINÉE<br><span style="font-size:11px;opacity:.55;font-family:'Share Tech Mono'">RECORD : ${MEM.best} · SESSION ${MEM.sessions}</span>`;
+  document.getElementById('startbtn').textContent = 'RECOMMENCER';
+  document.getElementById('ov').style.display = 'flex';
+}
+
+/* ── Reset ── */
+function resetGame() {
+  score = 0; lives = 5; combo = 0; maxCombo = 1; gframe = 0;
+  correctStreak = 0; sessionMaxLvl = 0;
+  drops = []; particles = []; floats = []; spawnT = 0;
+  gameStart = Date.now();
+  mode = 'num'; wordTarget = ''; wordBuilt = '';
+  document.getElementById('wordprog').style.display = 'none';
+  multIdx = MEM.sessions > 1 ? MEM.startMult : 0;
+  curSpd = MEM.sessions > 1 ? MEM.startSpd : 5.5;
+  lvl = MEM.sessions > 1 ? Math.min(MEM.startMult * 2, 4) : 0;
+  blind = false; adjustBlind();
+  updateHUD();
+}
+
+/* ── MediaPipe ── */
+async function startCamera() {
+  const video = document.getElementById('camv');
+  const oc = document.getElementById('camo');
+  const octx = oc.getContext('2d');
+  oc.width = 190; oc.height = 140;
+
+  const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+  hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.72, minTrackingConfidence: 0.68 });
+
+  const CONN = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[9,10],[10,11],[11,12],[13,14],[14,15],[15,16],[17,18],[18,19],[19,20],[0,17],[5,9],[9,13],[13,17]];
+
+  hands.onResults(res => {
+    octx.clearRect(0, 0, 190, 140);
+
+    // Reset visibilité
+    hands2[0].visible = false;
+    hands2[1].visible = false;
+
+    if (!res.multiHandLandmarks || !res.multiHandLandmarks.length) { hvisible = false; return; }
+
+    res.multiHandLandmarks.forEach((lm, idx) => {
+      if (idx > 1) return;
+      const h = hands2[idx];
+      h.visible = true;
+
+      // Ancre lm9 — stable poing ouvert ou fermé
+      h.rawX = (1 - lm[9].x) * W;
+      h.rawY = lm[9].y * H;
+
+      // Poing
+      let folded = 0;
+      [[8,5],[12,9],[16,13],[20,17]].forEach(([t,b]) => { if (lm[t].y > lm[b].y) folded++; });
+      h.fist = folded >= 3;
+
+      // Paume ouverte
+      let open = 0;
+      [[8,6],[12,10],[16,14],[20,18]].forEach(([t,p]) => { if (lm[t].y < lm[p].y) open++; });
+      h.open = open >= 4;
+      if (h.open && mode === 'word') { wordBuilt = ''; buildWordProg(); }
+
+      // Mini render — couleur différente par main
+      const col = idx === 0
+        ? (h.fist ? 'rgba(255,224,51,0.75)' : 'rgba(0,255,180,0.7)')
+        : (h.fist ? 'rgba(255,130,51,0.75)' : 'rgba(56,189,248,0.7)');
+      CONN.forEach(([a, b]) => {
+        octx.beginPath();
+        octx.moveTo((1 - lm[a].x) * 190, lm[a].y * 140);
+        octx.lineTo((1 - lm[b].x) * 190, lm[b].y * 140);
+        octx.strokeStyle = col; octx.lineWidth = 1.5; octx.stroke();
+      });
+      lm.forEach((l, i) => {
+        octx.beginPath(); octx.arc((1-l.x)*190, l.y*140, [4,8,12,16,20].includes(i)?3:1.5, 0, Math.PI*2);
+        octx.fillStyle = [4,8,12,16,20].includes(i) ? '#fff' : col; octx.fill();
+      });
+      });
+  });
+
+  const camera = new Camera(video, { onFrame: async () => { await hands.send({ image: video }); }, width: 190, height: 140 });
+  camera.start();
+  camActive = true;
+  document.getElementById('cams').textContent = 'CAM ON';
+  document.getElementById('cams').style.color = '#00ffb4';
+}
+
+/* ── Souris / clavier fallback ── */
+window.addEventListener('mousemove', e => { mx = e.clientX; my = e.clientY; });
+window.addEventListener('click', e => { if (gstate === 'playing') tryGrab(e.clientX, e.clientY); });
+window.addEventListener('touchmove', e => { e.preventDefault(); mx = e.touches[0].clientX; my = e.touches[0].clientY; }, { passive: false });
+window.addEventListener('touchend', e => { if (gstate === 'playing') tryGrab(e.changedTouches[0].clientX, e.changedTouches[0].clientY); });
+const keys = {};
+document.addEventListener('keydown', e => { keys[e.key] = true; if ([' ', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault(); });
+document.addEventListener('keyup', e => { keys[e.key] = false; });
+setInterval(() => {
+  if (gstate !== 'playing') return;
+  const spd = 9 + lvl * 0.4;
+  if (keys['ArrowLeft'] || keys['a']) mx = Math.max(30, (mx < 0 ? W / 2 : mx) - spd);
+  if (keys['ArrowRight'] || keys['d']) mx = Math.min(W - 30, (mx < 0 ? W / 2 : mx) + spd);
+  if (keys[' '] && !camActive) tryGrab(mx, my);
+}, 16);
+
+/* ── Start button ── */
+let camStarted = false;
+
+async function initCamera() {
+  if (camStarted) return;
+  camStarted = true;
+  try {
+    await startCamera();
+    document.getElementById('ovhint').textContent = 'Index pointé → curseur · Poing fermé → attraper · Souris/clavier aussi dispo';
+  } catch (e) {
+    document.getElementById('ovhint').textContent = 'Caméra indisponible — mode souris/clavier actif';
+  }
+}
+
+// Lancement caméra automatique dès le chargement de la page
+window.addEventListener('load', () => { initCamera(); });
+
+document.getElementById('startbtn').addEventListener('click', async () => {
+  await initCamera(); // au cas où pas encore démarrée
+  document.getElementById('ov').style.display = 'none';
+  resetGame();
+  gstate = 'playing';
+});
+
+/* Init HUD */
+if (MEM.sessions > 0) {
+  document.getElementById('ovmission').innerHTML = `OBJECTIF : ATTRAPE LES ${MULTS[MEM.startMult].label}<br><span style="font-size:11px;opacity:.55;font-family:'Share Tech Mono'">SESSION ${MEM.sessions + 1} · DIFFICULTÉ AJUSTÉE · VITESSE ${MEM.startSpd.toFixed(1)}×</span>`;
+}
+updateHUD();
+</script>
+</body>
+</html>

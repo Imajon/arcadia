@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NUMFALL — v4</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<style>
+:root{
+  --bg:#020308; --g1:rgba(0,255,180,0.03); --g2:rgba(0,255,180,0.06);
+  --c:#00ffb4; --cr:#ff2d6b; --cy:#ffe033; --cp:#c084fc; --cb:#38bdf8;
+  --panel:rgba(2,3,8,0.92); --border:rgba(0,255,180,0.12);
+  --text:#dff6f0; --muted:rgba(223,246,240,0.35);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{width:100%;height:100%;background:var(--bg);overflow:hidden;
+  font-family:'Orbitron',monospace;color:var(--text);}
+
+/* grid bg */
+#gbg{position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:linear-gradient(var(--g1) 1px,transparent 1px),
+    linear-gradient(90deg,var(--g1) 1px,transparent 1px);
+  background-size:48px 48px;}
+#gbg::before{content:'';position:absolute;inset:0;
+  background:radial-gradient(ellipse 100% 50% at 50% 110%,rgba(0,255,180,0.07) 0%,transparent 70%);}
+#gbg::after{content:'';position:absolute;inset:0;
+  background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.05) 3px,rgba(0,0,0,0.05) 4px);}
+
+#gc{position:fixed;inset:0;z-index:1;}
+
+/* ── HUD ── */
+#hud{position:fixed;top:0;left:0;right:0;z-index:20;height:56px;
+  display:flex;align-items:stretch;
+  border-bottom:1px solid var(--border);
+  background:linear-gradient(180deg,rgba(2,3,8,0.99) 0%,rgba(2,3,8,0) 100%);}
+.hb{display:flex;flex-direction:column;justify-content:center;align-items:center;
+  padding:0 16px;border-right:1px solid var(--border);min-width:90px;}
+.hb:last-child{border-right:none;margin-left:auto;}
+.hl{font-size:7px;letter-spacing:.25em;color:var(--c);opacity:.5;
+  text-transform:uppercase;margin-bottom:2px;font-family:'Share Tech Mono',monospace;}
+.hv{font-family:'Share Tech Mono',monospace;font-size:19px;line-height:1;}
+.lrow{display:flex;gap:5px;align-items:center;}
+.ld{width:9px;height:9px;border-radius:50%;background:var(--c);
+  box-shadow:0 0 7px var(--c);transition:all .3s;}
+.ld.off{background:rgba(255,255,255,0.08);box-shadow:none;}
+
+/* ── Mission ── */
+#mbar{position:fixed;top:56px;left:0;right:0;z-index:20;
+  display:flex;flex-direction:column;align-items:center;
+  padding:10px 24px 8px;
+  background:rgba(0,255,180,0.04);
+  border-bottom:1px solid rgba(0,255,180,0.07);}
+#mtxt{font-family:'Orbitron',monospace;font-weight:900;
+  font-size:clamp(18px,3vw,36px);color:var(--c);
+  letter-spacing:.12em;text-align:center;line-height:1.15;
+  text-shadow:0 0 20px rgba(0,255,180,0.4);}
+#msub{font-family:'Share Tech Mono',monospace;font-size:11px;
+  color:var(--muted);margin-top:4px;letter-spacing:.08em;}
+.mbadge{display:inline-block;margin-left:10px;font-size:9px;
+  padding:2px 8px;border:1px solid var(--cr);border-radius:2px;
+  color:var(--cr);letter-spacing:.12em;font-family:'Share Tech Mono',monospace;
+  vertical-align:middle;}
+
+/* ── Fact bar ── */
+#fbar{position:fixed;bottom:0;left:0;right:0;z-index:20;height:36px;
+  display:flex;align-items:center;gap:10px;padding:0 16px;
+  border-top:1px solid var(--border);
+  background:linear-gradient(0deg,rgba(2,3,8,.99) 0%,rgba(2,3,8,0) 100%);}
+#ficon{font-size:14px;}
+#ftxt{font-family:'Share Tech Mono',monospace;font-size:11px;
+  color:var(--muted);letter-spacing:.02em;}
+
+/* ── Speed bar lateral ── */
+#spbar{position:fixed;left:0;top:56px;bottom:36px;width:3px;z-index:20;
+  background:rgba(255,255,255,.04);}
+#spfill{position:absolute;bottom:0;left:0;right:0;
+  background:linear-gradient(0deg,var(--cr),var(--cy),var(--c));
+  transition:height .6s ease;}
+
+/* ── Cam ── */
+#camw{position:fixed;bottom:44px;right:16px;z-index:30;
+  width:190px;height:140px;border-radius:8px;overflow:hidden;
+  border:1px solid var(--border);background:#000;}
+#camv{width:100%;height:100%;object-fit:cover;transform:scaleX(-1);display:block;}
+#camo{position:absolute;inset:0;pointer-events:none;}
+#cams{position:absolute;top:5px;left:7px;
+  font-family:'Share Tech Mono',monospace;font-size:8px;
+  color:var(--c);background:rgba(0,0,0,.6);padding:2px 5px;border-radius:2px;}
+
+/* ── Buttons top ── */
+#topbtns{position:fixed;top:8px;right:16px;z-index:30;display:flex;gap:8px;}
+.tbtn{font-family:'Share Tech Mono',monospace;font-size:9px;letter-spacing:.1em;
+  color:var(--muted);border:1px solid rgba(255,255,255,.1);background:transparent;
+  padding:4px 10px;border-radius:2px;cursor:pointer;transition:all .15s;}
+.tbtn:hover{color:var(--c);border-color:rgba(0,255,180,.3);}
+
+/* ── Flash ── */
+#flash{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  font-family:'Orbitron',monospace;font-weight:900;
+  font-size:clamp(22px,4vw,48px);pointer-events:none;z-index:100;
+  opacity:0;transition:opacity .08s;letter-spacing:.12em;
+  text-shadow:0 0 30px currentColor;}
+
+/* ── Overlay ── */
+#ov{position:fixed;inset:0;z-index:200;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:18px;
+  background:rgba(2,3,8,.96);backdrop-filter:blur(8px);}
+.ovlogo{font-family:'Orbitron',monospace;font-weight:900;
+  font-size:clamp(40px,7vw,72px);color:var(--c);letter-spacing:.18em;
+  text-shadow:0 0 30px rgba(0,255,180,.5),0 0 80px rgba(0,255,180,.2);}
+.ovsub{font-family:'Share Tech Mono',monospace;font-size:10px;
+  letter-spacing:.4em;color:var(--muted);}
+.ovmission{font-family:'Orbitron',monospace;font-weight:700;
+  font-size:clamp(13px,2vw,20px);color:var(--c);
+  background:rgba(0,255,180,.05);border:1px solid rgba(0,255,180,.15);
+  border-radius:4px;padding:16px 36px;text-align:center;line-height:1.9;
+  letter-spacing:.06em;}
+.schema{display:flex;gap:14px;flex-wrap:wrap;justify-content:center;}
+.sbox{text-align:center;background:rgba(255,255,255,.03);
+  border:1px solid var(--border);border-radius:8px;padding:14px 18px;min-width:120px;}
+.sbox .si{font-size:30px;margin-bottom:6px;}
+.sbox .sl{font-family:'Share Tech Mono',monospace;font-size:8px;
+  color:var(--c);letter-spacing:.12em;text-transform:uppercase;margin-bottom:3px;}
+.sbox .sd{font-size:10px;color:var(--muted);line-height:1.5;}
+.ovstats{display:none;gap:12px;flex-wrap:wrap;justify-content:center;}
+.ostat{text-align:center;background:rgba(255,255,255,.03);
+  border:1px solid var(--border);border-radius:4px;padding:10px 16px;}
+.osv{font-family:'Share Tech Mono',monospace;font-size:22px;
+  color:var(--c);display:block;}
+.osl{font-size:9px;color:var(--muted);letter-spacing:.15em;text-transform:uppercase;}
+.btn{font-family:'Orbitron',monospace;font-size:12px;font-weight:700;
+  letter-spacing:.2em;color:var(--bg);background:var(--c);border:none;
+  border-radius:3px;padding:14px 48px;cursor:pointer;text-transform:uppercase;
+  box-shadow:0 0 24px rgba(0,255,180,.35);transition:all .15s;}
+.btn:hover{box-shadow:0 0 40px rgba(0,255,180,.55);transform:translateY(-1px);}
+.khint{font-family:'Share Tech Mono',monospace;font-size:9px;
+  color:var(--muted);letter-spacing:.1em;text-align:center;}
+
+/* word progress */
+#wordprog{position:fixed;bottom:44px;left:50%;transform:translateX(-50%);
+  z-index:20;display:none;align-items:center;gap:0;
+  background:rgba(2,3,8,.85);border:1px solid rgba(192,132,252,.3);
+  border-radius:6px;padding:10px 18px;}
+.wletter{width:32px;height:38px;display:flex;align-items:center;justify-content:center;
+  font-family:'Share Tech Mono',monospace;font-size:20px;font-weight:700;
+  border-bottom:2px solid rgba(192,132,252,.3);margin:0 2px;
+  color:rgba(192,132,252,.3);transition:all .25s;}
+.wletter.done{color:var(--cp);border-color:var(--cp);
+  text-shadow:0 0 10px rgba(192,132,252,.6);}
+</style>
+</head>
+<body>
+<div id="gbg"></div>
+<canvas id="gc"></canvas>
+
+<!-- HUD -->
+<div id="hud">
+  <div class="hb"><div class="hl">SCORE</div><div class="hv" id="hsc">000000</div></div>
+  <div class="hb"><div class="hl">NIV.</div><div class="hv" id="hlv">01</div></div>
+  <div class="hb"><div class="hl">COMBO</div><div class="hv" id="hco">×1</div></div>
+  <div class="hb"><div class="hl">VIES</div><div class="lrow" id="hlives"></div></div>
+  <div class="hb"><div class="hl">VITESSE</div><div class="hv" id="hsp">0.7×</div></div>
+  <div class="hb"><div class="hl">MODE</div><div class="hv" id="hmo" style="font-size:12px;color:var(--cy)">NUM</div></div>
+</div>
+
+<!-- Mission -->
+<div id="mbar">
+  <div id="mtxt">ATTRAPE LES MULTIPLES DE 2</div>
+  <div id="msub">Index pointé → curseur &nbsp;·&nbsp; Poing fermé → attraper</div>
+</div>
+
+<!-- Speed gauge -->
+<div id="spbar"><div id="spfill" style="height:4%"></div></div>
+
+<!-- Fact bar -->
+<div id="fbar"><span id="ficon">✦</span><span id="ftxt">Tends la main vers les bons tokens !</span></div>
+
+<!-- Cam -->
+<div id="camw">
+  <video id="camv" autoplay muted playsinline></video>
+  <canvas id="camo"></canvas>
+  <div id="cams">CAM OFF</div>
+</div>
+
+<!-- Top buttons -->
+<div id="topbtns">
+  <button class="tbtn" onclick="toggleFS()">⛶ PLEIN ÉCRAN</button>
+</div>
+
+<!-- Flash -->
+<div id="flash"></div>
+
+<!-- Word progress -->
+<div id="wordprog"></div>
+
+<!-- Overlay -->
+<div id="ov">
+  <div class="ovlogo">NUMFALL</div>
+  <div class="ovsub">PLUIE DE NOMBRES &amp; MOTS · CONTRÔLE PAR LES MAINS</div>
+  <div class="schema">
+    <div class="sbox"><div class="si">☝️</div><div class="sl">Index pointé</div><div class="sd">Déplace le curseur<br>sur les tokens</div></div>
+    <div class="sbox"><div class="si">✊</div><div class="sl">Poing fermé</div><div class="sd">Attrape le token<br>sous ta main</div></div>
+    <div class="sbox"><div class="si">✋</div><div class="sl">Paume ouverte</div><div class="sd">Efface le mot<br>en cours</div></div>
+  </div>
+  <div class="ovmission" id="ovmission">
+    OBJECTIF : ATTRAPE LES MULTIPLES DE 2<br>
+    <span style="font-size:11px;opacity:.55;font-family:'Share Tech Mono'">5 VIES · FORMES ET RÈGLES ÉVOLUENT · COMBOS = MULTIPLES PLUS DURS</span>
+  </div>
+  <div class="ovstats" id="ovstats">
+    <div class="ostat"><span class="osv" id="ovsc">—</span><span class="osl">Score</span></div>
+    <div class="ostat"><span class="osv" id="ovlv">—</span><span class="osl">Niveau max</span></div>
+    <div class="ostat"><span class="osv" id="ovco">—</span><span class="osl">Meilleur combo</span></div>
+    <div class="ostat"><span class="osv" id="ovmo">—</span><span class="osl">Mode final</span></div>
+  </div>
+  <button class="btn" id="startbtn">LANCER LA PARTIE</button>
+  <div class="khint" id="ovhint">Caméra en cours d'activation… · Souris / ← → / Espace aussi disponible</div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════
+   NUMFALL v4 — Engine
+═══════════════════════════════════════════════════ */
+const gc = document.getElementById('gc');
+const gctx = gc.getContext('2d');
+let W, H;
+const resize = () => { W = gc.width = window.innerWidth; H = gc.height = window.innerHeight; };
+window.addEventListener('resize', resize); resize();
+
+/* Fullscreen */
+const toggleFS = () => {
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+  else document.exitFullscreen();
+};
+document.addEventListener('fullscreenchange', () => {
+  document.querySelector('.tbtn').textContent = document.fullscreenElement ? '✕ QUITTER' : '⛶ PLEIN ÉCRAN';
+});
+
+/* ── Mémoire adaptative ── */
+const MK = 'numfall4';
+const loadMem = () => { try { return JSON.parse(sessionStorage.getItem(MK)) || defMem(); } catch { return defMem(); } };
+const saveMem = m => sessionStorage.setItem(MK, JSON.stringify(m));
+const defMem = () => ({ sessions: 0, avgSurvival: 1, avgLvl: 1, startSpd: 1.4, startMult: 0, best: 0 });
+let MEM = loadMem();
+
+/* ── Multiples ── */
+const MULTS = [
+  { n: 2,  label: 'MULTIPLES DE 2',        test: x => x % 2 === 0,              range: [2, 30] },
+  { n: 3,  label: 'MULTIPLES DE 3',        test: x => x % 3 === 0,              range: [3, 39] },
+  { n: 5,  label: 'MULTIPLES DE 5',        test: x => x % 5 === 0,              range: [5, 60] },
+  { n: 6,  label: 'MULTIPLES DE 2 ET 3',   test: x => x % 6 === 0,              range: [6, 60] },
+  { n: 7,  label: 'MULTIPLES DE 7',        test: x => x % 7 === 0,              range: [7, 77] },
+  { n: 4,  label: 'MULTIPLES DE 4',        test: x => x % 4 === 0,              range: [4, 64] },
+  { n: 11, label: 'MULTIPLES DE 11',       test: x => x % 11 === 0,             range: [11, 99] },
+  { n: 13, label: 'MULTIPLES DE 13',       test: x => x % 13 === 0,             range: [13, 91] },
+];
+
+/* ── Formes (évoluent avec le niveau) ── */
+// 0=cercle 1=hexagone 2=carré 3=triangle 4=étoile5 5=étoile6 6=losange 7=glitch
+const SHAPE_SEQ = [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 6, 7, 7];
+const getShapeIdx = lvl => SHAPE_SEQ[Math.min(lvl, SHAPE_SEQ.length - 1)];
+
+function drawShape(ctx, si, x, y, r, ang) {
+  ctx.beginPath();
+  switch (si) {
+    case 0: // cercle
+      ctx.arc(x, y, r, 0, Math.PI * 2); break;
+    case 1: // hexagone
+      for (let i = 0; i < 6; i++) { const a = ang + (Math.PI / 3) * i - Math.PI / 6; i ? ctx.lineTo(x + r * Math.cos(a), y + r * Math.sin(a)) : ctx.moveTo(x + r * Math.cos(a), y + r * Math.sin(a)); }
+      ctx.closePath(); break;
+    case 2: // carré
+      ctx.rect(x - r * 0.82, y - r * 0.82, r * 1.64, r * 1.64); break;
+    case 3: // triangle
+      for (let i = 0; i < 3; i++) { const a = ang + (Math.PI * 2 / 3) * i - Math.PI / 2; i ? ctx.lineTo(x + r * Math.cos(a), y + r * Math.sin(a)) : ctx.moveTo(x + r * Math.cos(a), y + r * Math.sin(a)); }
+      ctx.closePath(); break;
+    case 4: // étoile 5
+      for (let i = 0; i < 10; i++) { const a = ang + (Math.PI / 5) * i - Math.PI / 2; const rr = i % 2 === 0 ? r : r * 0.42; i ? ctx.lineTo(x + rr * Math.cos(a), y + rr * Math.sin(a)) : ctx.moveTo(x + rr * Math.cos(a), y + rr * Math.sin(a)); }
+      ctx.closePath(); break;
+    case 5: // étoile 6
+      for (let i = 0; i < 12; i++) { const a = ang + (Math.PI / 6) * i - Math.PI / 2; const rr = i % 2 === 0 ? r : r * 0.5; i ? ctx.lineTo(x + rr * Math.cos(a), y + rr * Math.sin(a)) : ctx.moveTo(x + rr * Math.cos(a), y + rr * Math.sin(a)); }
+      ctx.closePath(); break;
+    case 6: // losange
+      ctx.moveTo(x, y - r); ctx.lineTo(x + r * 0.65, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r * 0.65, y); ctx.closePath(); break;
+    case 7: // glitch (rects décalés)
+      ctx.rect(x - r + Math.sin(gframe * 0.4) * 5, y - r, r * 2, r * 2);
+      ctx.rect(x - r * 0.6 + Math.sin(gframe * 0.7 + 1) * 8, y - r * 0.3, r * 1.2, r * 0.5);
+      break;
+  }
+}
+
+/* ── Mots ── */
+const WORDSETS = [
+  ['CHAT', 'LUNE', 'ARBRE', 'MER', 'FEU'],
+  ['ROBOT', 'ETOILE', 'VILLE', 'NUIT', 'PONT'],
+  ['DRAGON', 'SOLEIL', 'MIROIR', 'FLECHE', 'OCEAN'],
+  ['CALCUL', 'NOMBRE', 'FIGURE', 'SOMME', 'PRODUIT'],
+  ['MULTIPLE', 'DIVISEUR', 'PREMIER', 'INFINI', 'ENTIER'],
+];
+
+/* ── État ── */
+let gstate = 'idle', gframe = 0;
+let score = 0, lives = 5, combo = 0, maxCombo = 1;
+let lvl = 0, multIdx = 0, curSpd = 0.65;
+let correctStreak = 0, sessionMaxLvl = 0;
+let blind = false; // false | 'dim' | 'full'
+let mode = 'num'; // 'num' | 'word'
+let wordTarget = '', wordBuilt = '';
+let drops = [], particles = [], floats = [];
+let spawnT = 0, gameStart = 0;
+
+/* hand — position lissée */
+let hx = -999, hy = -999;          // position affichée (lissée)
+let hrawX = -999, hrawY = -999;    // position brute courante
+let hfist = false, hopen = false, hvisible = false, prevFist = false;
+let camActive = false;
+const SMOOTH = 0.18; // facteur de lissage exponentiel (0=figé, 1=instantané)
+/* mouse fallback */
+let mx = -999, my = -999;
+
+/* ── Helpers couleurs ── */
+function tColor(isT) {
+  if (!blind) return isT ? '#00ffb4' : '#ff2d6b';
+  if (blind === 'dim') { const b = isT ? '0,255,180' : '255,45,107'; return `rgba(${b},0.2)`; }
+  return 'rgba(170,185,210,0.38)';
+}
+function tGlow(isT) {
+  if (!blind) return isT ? 'rgba(0,255,180,0.45)' : 'rgba(255,45,107,0.38)';
+  if (blind === 'dim') { const b = isT ? '0,255,180' : '255,45,107'; return `rgba(${b},0.1)`; }
+  return 'rgba(170,185,210,0.07)';
+}
+
+/* ── Multiples courants ── */
+const mc = () => MULTS[multIdx % MULTS.length];
+const isTarget = n => mc().test(n);
+function randN() {
+  const [lo, hi] = mc().range;
+  return lo + Math.floor(Math.random() * (hi - lo + 1));
+}
+
+/* ── Difficulté ── */
+function adjustBlind() {
+  if (lvl >= 10) blind = 'full';
+  else if (lvl >= 6) blind = 'dim';
+  else blind = false;
+}
+
+function checkMultChange() {
+  // Change de multiple tous les 6 combos
+  if (combo > 0 && combo % 6 === 0) {
+    const next = multIdx + 1;
+    if (next < MULTS.length) {
+      multIdx = next;
+      doFlash('MULTIPLE → ' + mc().n + ' !', '#ffe033');
+      updateMissionUI();
+    }
+  }
+  // Monte de niveau tous les 4 bonnes réponses consécutives
+  if (correctStreak > 0 && correctStreak % 4 === 0) {
+    lvl = Math.min(20, lvl + 1);
+    sessionMaxLvl = Math.max(sessionMaxLvl, lvl);
+    adjustBlind();
+    if (lvl > 1 && lvl % 3 === 0 && mode === 'num' && Math.random() < 0.55) {
+      triggerWordMode();
+    }
+    updateHUD();
+  }
+}
+
+/* ── Spawn drops ── */
+function spawnNum() {
+  const isT = Math.random() < 0.44;
+  let n, tries = 0;
+  if (isT) { do { n = randN(); tries++; } while (!isTarget(n) && tries < 50); }
+  else { do { n = randN(); tries++; } while (isTarget(n) && tries < 50); }
+  if (isT !== isTarget(n)) return;
+
+  const si = getShapeIdx(lvl);
+  const spd = curSpd * (0.82 + Math.random() * 0.36);
+  drops.push({
+    kind: 'num', x: 44 + Math.random() * (W - 88), y: -42,
+    val: n, isT, spd, si, ang: Math.random() * Math.PI * 2,
+    r: 24 + Math.min(lvl, 8) * 0.6,
+    col: tColor(isT), glow: tGlow(isT),
+    trail: [], wp: Math.random() * Math.PI * 2,
+    alpha: 1, caught: false, missed: false,
+  });
+}
+
+function spawnLetters() {
+  const needed = wordTarget[wordBuilt.length];
+  if (!needed) return;
+  const abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const pool = [needed];
+  let attempts = 0;
+  while (pool.length < Math.min(3 + Math.floor(lvl / 2), 7) && attempts < 50) {
+    const l = abc[Math.floor(Math.random() * 26)];
+    if (!pool.includes(l)) pool.push(l);
+    attempts++;
+  }
+  // Shuffle
+  for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+
+  const si = getShapeIdx(lvl);
+  pool.forEach(l => {
+    const isT = l === needed;
+    const spd = curSpd * 0.78 * (0.8 + Math.random() * 0.4);
+    drops.push({
+      kind: 'letter', x: 44 + Math.random() * (W - 88), y: -42,
+      val: l, isT, spd, si, ang: Math.random() * Math.PI * 2,
+      r: 28 + Math.min(lvl, 6) * 0.5,
+      col: isT ? '#c084fc' : tColor(false),
+      glow: isT ? 'rgba(192,132,252,0.4)' : tGlow(false),
+      trail: [], wp: Math.random() * Math.PI * 2,
+      alpha: 1, caught: false, missed: false,
+    });
+  });
+}
+
+/* ── Mode mot ── */
+function triggerWordMode() {
+  mode = 'word';
+  const set = WORDSETS[Math.min(Math.floor(lvl / 3), WORDSETS.length - 1)];
+  wordTarget = set[Math.floor(Math.random() * set.length)];
+  wordBuilt = '';
+  drops = [];
+  buildWordProg();
+  updateMissionUI();
+  doFlash('MODE LETTRES', '#c084fc');
+}
+
+function buildWordProg() {
+  const wp = document.getElementById('wordprog');
+  wp.style.display = 'flex';
+  wp.innerHTML = '';
+  for (let i = 0; i < wordTarget.length; i++) {
+    const d = document.createElement('div');
+    d.className = 'wletter' + (i < wordBuilt.length ? ' done' : '');
+    d.textContent = i < wordBuilt.length ? wordBuilt[i] : wordTarget[i];
+    wp.appendChild(d);
+  }
+}
+
+function returnToNumMode() {
+  mode = 'num';
+  drops = [];
+  document.getElementById('wordprog').style.display = 'none';
+  updateMissionUI();
+  doFlash('MODE NOMBRES', '#00ffb4');
+}
+
+/* ── Grab ── */
+const GRAB_R = 50;
+function tryGrab(px, py) {
+  let best = null, bd = Infinity;
+  drops.forEach(d => {
+    if (d.caught || d.missed) return;
+    const dist = Math.hypot(d.x - px, d.y - py);
+    if (dist < d.r + GRAB_R && dist < bd) { bd = dist; best = d; }
+  });
+  if (!best) return;
+  best.caught = true;
+  if (best.isT) onGood(best); else onBad(best);
+}
+
+function onGood(d) {
+  combo++; maxCombo = Math.max(maxCombo, combo); correctStreak++;
+  const pts = 10 * Math.max(1, combo);
+  score += pts;
+  // Accélère uniquement sur bonne réponse
+  curSpd = Math.min(4.5, curSpd + 0.022 + lvl * 0.003);
+  checkMultChange();
+  burst(d.x, d.y, d.kind === 'letter' ? '#c084fc' : '#00ffb4', 16);
+  floatAdd(d.x, d.y - 28, `+${pts}`, d.kind === 'letter' ? '#c084fc' : '#00ffb4');
+  if (d.kind === 'letter') {
+    wordBuilt += d.val;
+    buildWordProg();
+    if (wordBuilt === wordTarget) {
+      score += 200;
+      lives = Math.min(5, lives + 1);
+      burst(W / 2, H / 2, '#c084fc', 30);
+      doFlash('MOT ! +VIE', '#c084fc');
+      showFact(nextFact());
+      setTimeout(returnToNumMode, 1800);
+    }
+  } else {
+    showFact(nextFact());
+  }
+  updateHUD();
+}
+
+function onBad(d) {
+  combo = 0; correctStreak = Math.max(0, correctStreak - 2);
+  lives--;
+  // Vitesse ne change pas sur erreur
+  burst(d.x, d.y, '#ff2d6b', 10);
+  floatAdd(d.x, d.y - 28, '✕', '#ff2d6b');
+  updateHUD();
+  if (lives <= 0) setTimeout(endGame, 350);
+}
+
+function onMissedTarget(d) {
+  if (!d.isT) return;
+  combo = Math.max(0, combo - 1);
+  lives--;
+  floatAdd(d.x, H * 0.82, 'MANQUÉ', 'rgba(255,45,107,0.7)');
+  updateHUD();
+  if (lives <= 0) setTimeout(endGame, 350);
+}
+
+/* ── Particules ── */
+function burst(x, y, col, n) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, s = 2.5 + Math.random() * 5;
+    particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 2.5, alpha: 1, col, r: 2 + Math.random() * 3 });
+  }
+}
+function floatAdd(x, y, txt, col) { floats.push({ x, y, txt, col, alpha: 1, vy: -1.6 }); }
+
+/* ── Facts ── */
+const FACTS = [
+  { i: '🐙', t: 'Une pieuvre a 3 cœurs — 3 est impair mais bat en rythme ternaire !' },
+  { i: '🌍', t: 'La Terre tourne à 1 674 km/h. 1 674 = 2×3×279 — multiple de 6 !' },
+  { i: '🦷', t: '32 dents humaines. 32 = 2⁵ — une puissance de deux parfaite !' },
+  { i: '🐝', t: '60 000 abeilles dans une ruche. Multiple de 2, 3, 4, 5, 6, 10...' },
+  { i: '🌙', t: 'La Lune est à 384 400 km de la Terre. 384 400 = multiple de 2 !' },
+  { i: '🐘', t: 'Un éléphant pèse 6 000 kg. 6 = 2×3, le premier nombre parfait !' },
+  { i: '🦋', t: 'Tout insecte a 6 pattes. 6 = 2×3 — les insectes aiment les multiples !' },
+  { i: '⭐', t: 'Le Soleil a 4,6 milliards d\'années. 46 est multiple de 2 !' },
+  { i: '🧠', t: '86 milliards de neurones. 86 = 2×43 — ton cerveau est un nombre pair !' },
+  { i: '🚀', t: 'Apollo 11 : 8 jours de voyage. 8 = 2³ — la Lune aime les puissances de 2 !' },
+  { i: '🦈', t: '40 000 dents dans la vie d\'un requin. 40 000 = 2⁶ × 5⁴ × 5 !' },
+  { i: '🌈', t: '7 couleurs dans l\'arc-en-ciel. 7 est premier — il refuse d\'être divisé !' },
+];
+let usedF = [];
+function nextFact() {
+  if (usedF.length >= FACTS.length) usedF = [];
+  const av = FACTS.filter((_, i) => !usedF.includes(i));
+  const f = av[Math.floor(Math.random() * av.length)];
+  usedF.push(FACTS.indexOf(f));
+  return f;
+}
+function showFact(f) { document.getElementById('ficon').textContent = f.i; document.getElementById('ftxt').textContent = f.t; }
+
+/* ── HUD ── */
+function updateHUD() {
+  document.getElementById('hsc').textContent = String(score).padStart(6, '0');
+  document.getElementById('hlv').textContent = String(lvl + 1).padStart(2, '0');
+  document.getElementById('hco').textContent = '×' + Math.max(1, combo);
+  document.getElementById('hsp').textContent = curSpd.toFixed(1) + '×';
+  document.getElementById('hmo').textContent = mode === 'word' ? 'MOT' : 'NUM';
+  document.getElementById('hmo').style.color = mode === 'word' ? '#c084fc' : '#ffe033';
+  const lr = document.getElementById('hlives'); lr.innerHTML = '';
+  for (let i = 0; i < 5; i++) { const d = document.createElement('div'); d.className = 'ld' + (i >= lives ? ' off' : ''); lr.appendChild(d); }
+  const pct = Math.min(100, ((curSpd - 0.65) / 3.85) * 100);
+  document.getElementById('spfill').style.height = pct + '%';
+  updateMissionUI();
+}
+
+function updateMissionUI() {
+  let txt = '';
+  if (mode === 'num') {
+    txt = 'ATTRAPE LES ' + mc().label;
+    if (blind === 'dim') txt += ' <span class="mbadge">INDICES RÉDUITS</span>';
+    if (blind === 'full') txt += ' <span class="mbadge">MODE AVEUGLE</span>';
+  } else {
+    txt = 'FORME LE MOT : <span style="color:#c084fc;letter-spacing:.2em">' + wordTarget + '</span>';
+  }
+  document.getElementById('mtxt').innerHTML = txt;
+  const shape = ['CERCLE', 'HEXAGONE', 'CARRÉ', 'TRIANGLE', 'ÉTOILE 5', 'ÉTOILE 6', 'LOSANGE', 'GLITCH'][getShapeIdx(lvl)];
+  document.getElementById('msub').textContent = mode === 'num'
+    ? `Forme : ${shape} · Ferme la main pour attraper · Vitesse auto sur bonne réponse`
+    : `Attrape la bonne lettre · Paume ouverte = effacer · Mot : ${wordBuilt || '—'}`;
+}
+
+/* ── Flash ── */
+function doFlash(txt, col = '#00ffb4') {
+  const el = document.getElementById('flash');
+  el.textContent = txt; el.style.color = col; el.style.opacity = '1';
+  setTimeout(() => { el.style.opacity = '0'; }, 1100);
+}
+
+/* ── Dessin des tokens ── */
+function drawToken(d) {
+  gctx.save();
+  gctx.globalAlpha = d.alpha;
+
+  // Trail
+  d.trail.forEach(t => {
+    gctx.save(); gctx.globalAlpha = d.alpha * t.a * 0.22;
+    gctx.beginPath(); gctx.arc(t.x, t.y, d.r * 0.35, 0, Math.PI * 2);
+    gctx.fillStyle = d.glow; gctx.fill(); gctx.restore();
+  });
+
+  // Halo
+  const g = gctx.createRadialGradient(d.x, d.y, 0, d.x, d.y, d.r * 2.2);
+  g.addColorStop(0, d.glow); g.addColorStop(1, 'rgba(0,0,0,0)');
+  gctx.beginPath(); gctx.arc(d.x, d.y, d.r * 2.2, 0, Math.PI * 2);
+  gctx.fillStyle = g; gctx.fill();
+
+  // Forme
+  gctx.beginPath();
+  drawShape(gctx, d.si, d.x, d.y, d.r, d.ang);
+  gctx.strokeStyle = d.col; gctx.lineWidth = 1.8;
+  gctx.shadowBlur = 8; gctx.shadowColor = d.col;
+  gctx.stroke();
+  gctx.shadowBlur = 0;
+  gctx.fillStyle = 'rgba(2,3,8,0.84)'; gctx.fill();
+
+  // Label
+  const fs = d.kind === 'letter' ? d.r * 1.1 : d.r * 0.88;
+  gctx.fillStyle = d.col;
+  gctx.font = `700 ${fs}px 'Share Tech Mono',monospace`;
+  gctx.textAlign = 'center'; gctx.textBaseline = 'middle';
+  gctx.fillText(d.val, d.x, d.y + 1);
+
+  d.ang += 0.007 + lvl * 0.0015;
+  gctx.restore();
+}
+
+/* ── Curseur main ── */
+function drawCursor() {
+  const x = camActive ? hx : mx;
+  const y = camActive ? hy : my;
+  if (x < 0 || y < 0) return;
+  const fist = camActive ? hfist : false;
+
+  gctx.save();
+  // Anneau extérieur pointillé
+  gctx.beginPath(); gctx.arc(x, y, GRAB_R, 0, Math.PI * 2);
+  gctx.setLineDash([4, 5]);
+  gctx.strokeStyle = fist ? 'rgba(255,224,51,0.55)' : 'rgba(0,255,180,0.28)';
+  gctx.lineWidth = 1; gctx.stroke(); gctx.setLineDash([]);
+
+  // Halo
+  const gr = gctx.createRadialGradient(x, y, 0, x, y, GRAB_R);
+  gr.addColorStop(0, fist ? 'rgba(255,224,51,0.18)' : 'rgba(0,255,180,0.1)');
+  gr.addColorStop(1, 'rgba(0,0,0,0)');
+  gctx.beginPath(); gctx.arc(x, y, GRAB_R, 0, Math.PI * 2);
+  gctx.fillStyle = gr; gctx.fill();
+
+  // Centre
+  gctx.beginPath(); gctx.arc(x, y, fist ? 9 : 5, 0, Math.PI * 2);
+  gctx.fillStyle = fist ? '#ffe033' : '#00ffb4';
+  gctx.shadowBlur = 12; gctx.shadowColor = fist ? '#ffe033' : '#00ffb4';
+  gctx.fill(); gctx.shadowBlur = 0;
+
+  if (!fist) {
+    gctx.strokeStyle = 'rgba(0,255,180,0.55)'; gctx.lineWidth = 1;
+    gctx.beginPath(); gctx.moveTo(x - 14, y); gctx.lineTo(x + 14, y); gctx.stroke();
+    gctx.beginPath(); gctx.moveTo(x, y - 14); gctx.lineTo(x, y + 14); gctx.stroke();
+  }
+  gctx.restore();
+}
+
+/* ── Boucle principale ── */
+function loop() {
+  requestAnimationFrame(loop);
+  if (gstate !== 'playing') return;
+  gframe++;
+
+  // Spawn
+  const si = Math.max(18, 85 - lvl * 6 - Math.floor((curSpd - 0.65) * 10));
+  spawnT++;
+  if (spawnT >= si) {
+    spawnT = 0;
+    if (mode === 'num') spawnNum();
+    else if (drops.filter(d => !d.caught && !d.missed).length < 5) spawnLetters();
+  }
+
+  // Fond
+  gctx.clearRect(0, 0, W, H);
+  gctx.fillStyle = 'rgba(2,3,8,0.18)'; gctx.fillRect(0, 0, W, H);
+  for (let y = 0; y < H; y += 95) {
+    const yy = (y + gframe * 0.22) % H;
+    gctx.fillStyle = `rgba(0,255,180,${0.008 + Math.sin(gframe * 0.012 + y * 0.07) * 0.004})`;
+    gctx.fillRect(0, yy, W, 1);
+  }
+
+  const botY = H - 36;
+
+  // Update + draw drops
+  drops.forEach(d => {
+    if (d.caught || d.missed) return;
+    d.x += Math.sin(gframe * 0.035 + d.wp) * 0.4;
+    d.y += d.spd;
+    d.trail.push({ x: d.x, y: d.y, a: 0.55 });
+    if (d.trail.length > 8) d.trail.shift();
+    d.trail.forEach(t => t.a *= 0.8);
+    if (d.y - d.r > botY) { d.missed = true; onMissedTarget(d); return; }
+    drawToken(d);
+  });
+  drops = drops.filter(d => !(d.missed || (d.caught && d.y > H + 60)));
+
+  // Lissage position main
+  if (hvisible && hrawX > 0) {
+    if (hx < 0) { hx = hrawX; hy = hrawY; }
+    else { hx += (hrawX - hx) * SMOOTH; hy += (hrawY - hy) * SMOOTH; }
+  }
+
+  // Fist grab
+  if (camActive && hfist && !prevFist && hvisible) tryGrab(hx, hy);
+  prevFist = hfist;
+
+  // Particules
+  particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += 0.12; p.alpha -= 0.027; });
+  particles = particles.filter(p => p.alpha > 0);
+  particles.forEach(p => {
+    gctx.save(); gctx.globalAlpha = p.alpha;
+    gctx.beginPath(); gctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    gctx.fillStyle = p.col; gctx.fill(); gctx.restore();
+  });
+
+  // Floats
+  floats.forEach(f => { f.y += f.vy; f.alpha -= 0.02; });
+  floats = floats.filter(f => f.alpha > 0);
+  floats.forEach(f => {
+    gctx.save(); gctx.globalAlpha = f.alpha;
+    gctx.font = "700 15px 'Share Tech Mono',monospace";
+    gctx.textAlign = 'center'; gctx.textBaseline = 'middle';
+    gctx.fillStyle = f.col; gctx.fillText(f.txt, f.x, f.y); gctx.restore();
+  });
+
+  drawCursor();
+}
+loop();
+
+/* ── Game over ── */
+function endGame() {
+  gstate = 'over';
+  const sr = lives / 5;
+  MEM.sessions++;
+  MEM.avgSurvival = (MEM.avgSurvival * (MEM.sessions - 1) + sr) / MEM.sessions;
+  MEM.avgLvl = (MEM.avgLvl * (MEM.sessions - 1) + (lvl + 1)) / MEM.sessions;
+  MEM.best = Math.max(MEM.best, score);
+  const fast = (Date.now() - gameStart) < 20000 && lives === 0;
+  if (MEM.sessions >= 2) {
+    if (fast && MEM.avgSurvival < 0.25) { MEM.startSpd = Math.max(0.55, MEM.startSpd - 0.08); MEM.startMult = Math.max(0, MEM.startMult - 1); }
+    else if (MEM.avgSurvival > 0.55 && sessionMaxLvl >= 5) { MEM.startSpd = Math.min(1.3, MEM.startSpd + 0.07); MEM.startMult = Math.min(2, MEM.startMult + 1); }
+    else if (MEM.avgSurvival > 0.35) MEM.startSpd = Math.min(1.1, MEM.startSpd + 0.03);
+  }
+  saveMem(MEM);
+  document.getElementById('ovsc').textContent = String(score).padStart(6, '0');
+  document.getElementById('ovlv').textContent = sessionMaxLvl + 1;
+  document.getElementById('ovco').textContent = '×' + maxCombo;
+  document.getElementById('ovmo').textContent = mode === 'word' ? 'MOT' : 'NUM';
+  document.getElementById('ovstats').style.display = 'flex';
+  document.getElementById('ovmission').innerHTML = score >= MEM.best
+    ? `RECORD PERSONNEL !<br><span style="font-size:11px;opacity:.55;font-family:'Share Tech Mono'">SCORE : ${score}</span>`
+    : `PARTIE TERMINÉE<br><span style="font-size:11px;opacity:.55;font-family:'Share Tech Mono'">RECORD : ${MEM.best} · SESSION ${MEM.sessions}</span>`;
+  document.getElementById('startbtn').textContent = 'RECOMMENCER';
+  document.getElementById('ov').style.display = 'flex';
+}
+
+/* ── Reset ── */
+function resetGame() {
+  score = 0; lives = 5; combo = 0; maxCombo = 1; gframe = 0;
+  correctStreak = 0; sessionMaxLvl = 0;
+  drops = []; particles = []; floats = []; spawnT = 0;
+  gameStart = Date.now();
+  mode = 'num'; wordTarget = ''; wordBuilt = '';
+  document.getElementById('wordprog').style.display = 'none';
+  multIdx = MEM.sessions > 1 ? MEM.startMult : 0;
+  curSpd = MEM.sessions > 1 ? MEM.startSpd : 1.4;
+  lvl = MEM.sessions > 1 ? Math.min(MEM.startMult * 2, 4) : 0;
+  blind = false; adjustBlind();
+  updateHUD();
+}
+
+/* ── MediaPipe ── */
+async function startCamera() {
+  const video = document.getElementById('camv');
+  const oc = document.getElementById('camo');
+  const octx = oc.getContext('2d');
+  oc.width = 190; oc.height = 140;
+
+  const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+  hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.72, minTrackingConfidence: 0.68 });
+
+  hands.onResults(res => {
+    octx.clearRect(0, 0, 190, 140);
+    if (!res.multiHandLandmarks || !res.multiHandLandmarks.length) { hvisible = false; return; }
+    hvisible = true;
+    const lm = res.multiHandLandmarks[0];
+
+    // Poing : 4 doigts pliés — calculer AVANT de choisir l'ancre
+    let folded = 0;
+    [[8, 5], [12, 9], [16, 13], [20, 17]].forEach(([t, b]) => { if (lm[t].y > lm[b].y) folded++; });
+    hfist = folded >= 3;
+
+    // Ancre curseur :
+    // - Poing fermé → poignet (lm0) : point le plus stable, ne bouge pas quand les doigts se plient
+    // - Index pointé → bout de l'index (lm8) : précis pour viser
+    const anchor = hfist ? lm[0] : lm[8];
+    hrawX = (1 - anchor.x) * W;
+    hrawY = anchor.y * H;
+
+    // Paume ouverte : 4 doigts levés
+    let open = 0;
+    [[8, 6], [12, 10], [16, 14], [20, 18]].forEach(([t, p]) => { if (lm[t].y < lm[p].y) open++; });
+    hopen = open >= 4;
+    if (hopen && mode === 'word') { wordBuilt = ''; buildWordProg(); }
+
+    // Mini render
+    const CONN = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[9,10],[10,11],[11,12],[13,14],[14,15],[15,16],[17,18],[18,19],[19,20],[0,17],[5,9],[9,13],[13,17]];
+    CONN.forEach(([a, b]) => {
+      octx.beginPath();
+      octx.moveTo((1 - lm[a].x) * 190, lm[a].y * 140);
+      octx.lineTo((1 - lm[b].x) * 190, lm[b].y * 140);
+      octx.strokeStyle = hfist ? 'rgba(255,224,51,0.7)' : 'rgba(0,255,180,0.65)';
+      octx.lineWidth = 1.5; octx.stroke();
+    });
+    lm.forEach((l, i) => {
+      octx.beginPath(); octx.arc((1 - l.x) * 190, l.y * 140, [4,8,12,16,20].includes(i) ? 3 : 1.5, 0, Math.PI * 2);
+      octx.fillStyle = [4,8,12,16,20].includes(i) ? '#fff' : (hfist ? 'rgba(255,224,51,0.9)' : 'rgba(0,255,180,0.8)');
+      octx.fill();
+    });
+  });
+
+  const camera = new Camera(video, { onFrame: async () => { await hands.send({ image: video }); }, width: 190, height: 140 });
+  camera.start();
+  camActive = true;
+  document.getElementById('cams').textContent = 'CAM ON';
+  document.getElementById('cams').style.color = '#00ffb4';
+}
+
+/* ── Souris / clavier fallback ── */
+window.addEventListener('mousemove', e => { mx = e.clientX; my = e.clientY; });
+window.addEventListener('click', e => { if (gstate === 'playing') tryGrab(e.clientX, e.clientY); });
+window.addEventListener('touchmove', e => { e.preventDefault(); mx = e.touches[0].clientX; my = e.touches[0].clientY; }, { passive: false });
+window.addEventListener('touchend', e => { if (gstate === 'playing') tryGrab(e.changedTouches[0].clientX, e.changedTouches[0].clientY); });
+const keys = {};
+document.addEventListener('keydown', e => { keys[e.key] = true; if ([' ', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault(); });
+document.addEventListener('keyup', e => { keys[e.key] = false; });
+setInterval(() => {
+  if (gstate !== 'playing') return;
+  const spd = 9 + lvl * 0.4;
+  if (keys['ArrowLeft'] || keys['a']) mx = Math.max(30, (mx < 0 ? W / 2 : mx) - spd);
+  if (keys['ArrowRight'] || keys['d']) mx = Math.min(W - 30, (mx < 0 ? W / 2 : mx) + spd);
+  if (keys[' '] && !camActive) tryGrab(mx, my);
+}, 16);
+
+/* ── Start button ── */
+let camStarted = false;
+
+async function initCamera() {
+  if (camStarted) return;
+  camStarted = true;
+  try {
+    await startCamera();
+    document.getElementById('ovhint').textContent = 'Index pointé → curseur · Poing fermé → attraper · Souris/clavier aussi dispo';
+  } catch (e) {
+    document.getElementById('ovhint').textContent = 'Caméra indisponible — mode souris/clavier actif';
+  }
+}
+
+// Lancement caméra automatique dès le chargement de la page
+window.addEventListener('load', () => { initCamera(); });
+
+document.getElementById('startbtn').addEventListener('click', async () => {
+  await initCamera(); // au cas où pas encore démarrée
+  document.getElementById('ov').style.display = 'none';
+  resetGame();
+  gstate = 'playing';
+});
+
+/* Init HUD */
+if (MEM.sessions > 0) {
+  document.getElementById('ovmission').innerHTML = `OBJECTIF : ATTRAPE LES ${MULTS[MEM.startMult].label}<br><span style="font-size:11px;opacity:.55;font-family:'Share Tech Mono'">SESSION ${MEM.sessions + 1} · DIFFICULTÉ AJUSTÉE · VITESSE ${MEM.startSpd.toFixed(1)}×</span>`;
+}
+updateHUD();
+</script>
+</body>
+</html>

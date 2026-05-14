@@ -1,0 +1,8 @@
+{
+  "name": "Face Expression Weaver",
+  "description": "An application that detects facial expressions through the webcam and draws temporary, fading links between faces that share the same expression.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": []
+}
