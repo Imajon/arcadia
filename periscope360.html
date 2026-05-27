@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>PÉRI·SCOPE · SOUS-MARIN</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+canvas { display: block; position: fixed; inset: 0; }
+
+/* ── HUBLOT CIRCULAIRE ── */
+#porthole-mask {
+  position: fixed; inset: 0;
+  pointer-events: none; z-index: 4;
+}
+#porthole-mask svg { width: 100%; height: 100%; }
+
+/* ── VIGNETTE INTERNE ── */
+#inner-vignette {
+  position: fixed; inset: 0;
+  pointer-events: none; z-index: 5;
+  background: radial-gradient(circle at center, transparent 30%, rgba(0,8,12,0.55) 65%, rgba(0,8,12,0.92) 80%);
+}
+
+/* ── SCANLINES ── */
+#scanlines {
+  position: fixed; inset: 0;
+  pointer-events: none; z-index: 6;
+  background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.04) 3px, rgba(0,0,0,0.04) 4px);
+}
+
+/* ── HUD CERCLE PÉRI ── */
+#hud {
+  position: fixed; inset: 0;
+  pointer-events: none; z-index: 7;
+}
+#hud svg { width: 100%; height: 100%; }
+
+/* ── OVERLAY PERMISSION ── */
+#overlay {
+  position: fixed; inset: 0;
+  background: #000d12;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  z-index: 100; gap: 28px; padding: 40px;
+  text-align: center;
+}
+#overlay-sub {
+  font-family: 'Courier New', monospace;
+  font-size: 9px; letter-spacing: 0.35em;
+  color: rgba(100,200,180,0.45);
+  text-transform: uppercase;
+}
+#overlay h1 {
+  font-family: 'Courier New', monospace;
+  font-size: 20px; letter-spacing: 0.4em;
+  color: rgba(140,230,200,1);
+  font-weight: normal;
+  line-height: 1.5;
+}
+#overlay p {
+  font-family: 'Courier New', monospace;
+  font-size: 12px; letter-spacing: 0.08em;
+  color: rgba(100,200,180,0.5);
+  line-height: 1.9;
+}
+#start-btn {
+  font-family: 'Courier New', monospace;
+  font-size: 11px; letter-spacing: 0.35em;
+  text-transform: uppercase;
+  background: transparent;
+  border: 1px solid rgba(140,230,200,0.5);
+  color: rgba(140,230,200,0.9);
+  padding: 16px 36px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+#start-btn:active { background: rgba(140,230,200,0.08); border-color: rgba(140,230,200,0.9); }
+
+/* ── RECALIBRER ── */
+#recal-btn {
+  position: fixed; bottom: 28px; right: 20px;
+  z-index: 20;
+  font-family: 'Courier New', monospace;
+  font-size: 9px; letter-spacing: 0.2em;
+  text-transform: uppercase;
+  background: transparent;
+  border: 1px solid rgba(140,230,200,0.25);
+  color: rgba(140,230,200,0.4);
+  padding: 8px 14px;
+  cursor: pointer;
+  display: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#recal-btn:active { color: rgba(140,230,200,0.9); border-color: rgba(140,230,200,0.7); }
+</style>
+</head>
+<body>
+
+<!-- OVERLAY -->
+<div id="overlay">
+  <div id="overlay-sub">Classe Kilo · Profondeur 45m</div>
+  <h1>PÉRI·SCOPE</h1>
+  <p>Tenez votre téléphone verticalement.<br>Tournez sur vous-même pour observer<br>l'horizon à 360°.</p>
+  <button id="start-btn" onclick="startApp()">IMMERGER</button>
+</div>
+
+<!-- COUCHES UI (sous le canvas au départ, injectées après) -->
+<div id="porthole-mask"></div>
+<div id="inner-vignette"></div>
+<div id="scanlines"></div>
+<div id="hud"></div>
+<button id="recal-btn" onclick="recalibrate()">↺ RECALER</button>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* ═══════════════════════════════════════
+   ÉTAT GLOBAL
+═══════════════════════════════════════ */
+let renderer, scene, camera;
+let currentYaw = 0, targetYaw = 0;
+let alphaOffset = null;
+let gyroActive = false;
+let gyroMode = 'none'; // 'rotationRate' | 'alpha' | 'touch'
+let touchStartX = 0, isDragging = false;
+let animT = 0;
+let lastGyroTime = null;
+const LERP = 0.14;
+const C = 'rgba(140,230,200,';  // couleur signature
+
+/* ═══════════════════════════════════════
+   SCÈNE SOUS-MARINE
+═══════════════════════════════════════ */
+function buildScene() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x00141e);
+  scene.fog = new THREE.FogExp2(0x00141e, 0.022);
+
+  // Lumière ambiante froide
+  scene.add(new THREE.AmbientLight(0x0a2030, 1.2));
+
+  // Lumière bleue diffuse venant du dessus (surface)
+  const topLight = new THREE.DirectionalLight(0x0055aa, 0.8);
+  topLight.position.set(0, 20, 0);
+  scene.add(topLight);
+
+  // Lumières de caustiques colorées
+  const caustic1 = new THREE.PointLight(0x0077cc, 3, 35);
+  caustic1.position.set(0, 8, 0);
+  scene.add(caustic1);
+  const caustic2 = new THREE.PointLight(0x003366, 2, 25);
+  caustic2.position.set(-12, 5, -12);
+  scene.add(caustic2);
+
+  // ── SOL MARIN ──
+  const sandGeo = new THREE.PlaneGeometry(100, 100, 40, 40);
+  // Ondulation du sol
+  const pos = sandGeo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), z = pos.getZ(i);
+    pos.setY(i, Math.sin(x * 0.3) * 0.3 + Math.cos(z * 0.25) * 0.25);
+  }
+  sandGeo.computeVertexNormals();
+  const sandMat = new THREE.MeshStandardMaterial({ color: 0x0a2818, roughness: 1, metalness: 0 });
+  const sand = new THREE.Mesh(sandGeo, sandMat);
+  sand.rotation.x = -Math.PI / 2;
+  sand.position.y = -4;
+  scene.add(sand);
+
+  // ── GRILLE SONAR sur le sol ──
+  const gridH = new THREE.GridHelper(80, 40, 0x0a3020, 0x061810);
+  gridH.position.y = -3.95;
+  scene.add(gridH);
+
+  // ── CORAUX / ROCHERS ──
+  const rockMat = new THREE.MeshStandardMaterial({ color: 0x0d2a20, roughness: 0.8, metalness: 0.1, emissive: 0x001a10, emissiveIntensity: 0.3 });
+  const coralPositions = [
+    [-5,0,-7],[5,0,-7],[-8,0,3],[8,0,3],[0,0,-12],[12,0,0],[-12,0,0],[0,0,12],
+    [-3,0,5],[3,0,-4],[-7,0,-2],[7,0,2],[2,0,8],[-2,0,-8],[10,0,7],[-10,0,-7]
+  ];
+  const coralHeights = [4,5,3,5,6,3,4,4,7,2.5,3.5,4,3,5,3,4];
+  coralPositions.forEach((p,i)=>{
+    const h = coralHeights[i];
+    const w = 0.5 + Math.random()*0.8;
+    // pilier principal
+    const geo = new THREE.CylinderGeometry(w*0.4, w*0.7, h, 7);
+    const mesh = new THREE.Mesh(geo, rockMat);
+    mesh.position.set(p[0], -4 + h/2, p[2]);
+    mesh.rotation.y = Math.random()*Math.PI;
+    scene.add(mesh);
+    // rocher en haut
+    const topGeo = new THREE.SphereGeometry(w*0.55, 8, 6);
+    const top = new THREE.Mesh(topGeo, rockMat);
+    top.position.set(p[0], -4 + h + w*0.2, p[2]);
+    scene.add(top);
+  });
+
+  // ── BULLES ──
+  const bubbleGeo = new THREE.SphereGeometry(0.06, 6, 6);
+  const bubbleMat = new THREE.MeshBasicMaterial({ color: 0x44aacc, transparent: true, opacity: 0.35, wireframe: false });
+  const bubbles = [];
+  for (let i = 0; i < 120; i++) {
+    const b = new THREE.Mesh(bubbleGeo, bubbleMat);
+    b.position.set((Math.random()-0.5)*30, (Math.random()-0.5)*8, (Math.random()-0.5)*30);
+    b.userData.speed = 0.005 + Math.random()*0.015;
+    b.userData.drift = (Math.random()-0.5)*0.003;
+    b.userData.startY = b.position.y;
+    scene.add(b);
+    bubbles.push(b);
+  }
+  scene.userData.bubbles = bubbles;
+
+  // ── PARTICULES PLANCTON ──
+  const plankGeo = new THREE.BufferGeometry();
+  const plankCount = 800;
+  const plankPos = new Float32Array(plankCount * 3);
+  for (let i = 0; i < plankCount; i++) {
+    plankPos[i*3]   = (Math.random()-0.5)*50;
+    plankPos[i*3+1] = (Math.random()-0.5)*10;
+    plankPos[i*3+2] = (Math.random()-0.5)*50;
+  }
+  plankGeo.setAttribute('position', new THREE.BufferAttribute(plankPos, 3));
+  const plankMat = new THREE.PointsMaterial({ color: 0x33ffaa, size: 0.06, transparent: true, opacity: 0.5 });
+  scene.add(new THREE.Points(plankGeo, plankMat));
+
+  // ── POISSONS (simples ellipsoïdes) ──
+  const fishMat = new THREE.MeshStandardMaterial({ color: 0x115533, emissive: 0x002211, emissiveIntensity: 0.5, roughness: 0.4 });
+  const schools = [];
+  for (let i = 0; i < 18; i++) {
+    const geo = new THREE.SphereGeometry(1, 8, 5);
+    geo.scale(0.4, 0.18, 0.12);
+    const f = new THREE.Mesh(geo, fishMat);
+    const angle = Math.random()*Math.PI*2;
+    const radius = 4 + Math.random()*8;
+    f.position.set(Math.cos(angle)*radius, (Math.random()-0.5)*3, Math.sin(angle)*radius);
+    f.userData.angle = angle;
+    f.userData.radius = radius;
+    f.userData.speed = 0.003 + Math.random()*0.005;
+    f.userData.yOffset = (Math.random()-0.5)*3;
+    f.userData.yWave = Math.random()*Math.PI*2;
+    scene.add(f);
+    schools.push(f);
+  }
+  scene.userData.fish = schools;
+
+  // ── RAYON DE LUMIÈRE DE SURFACE ──
+  const rayGeo = new THREE.CylinderGeometry(0.1, 2.5, 12, 12, 1, true);
+  const rayMat = new THREE.MeshBasicMaterial({ color: 0x0066aa, transparent: true, opacity: 0.04, side: THREE.DoubleSide });
+  const ray = new THREE.Mesh(rayGeo, rayMat);
+  ray.position.set(2, 3, -3);
+  scene.add(ray);
+  const ray2 = new THREE.Mesh(rayGeo, rayMat);
+  ray2.position.set(-4, 3, 4);
+  scene.add(ray2);
+
+  // ── ÉPAVE SIMPLIFIÉE ──
+  const wreckMat = new THREE.MeshStandardMaterial({ color: 0x0a1f18, roughness: 1, metalness: 0.6, emissive: 0x001008, emissiveIntensity: 0.2 });
+  // Coque
+  const hullGeo = new THREE.CylinderGeometry(1.2, 1.5, 8, 10, 1, false);
+  const hull = new THREE.Mesh(hullGeo, wreckMat);
+  hull.rotation.z = Math.PI/2;
+  hull.rotation.y = 0.6;
+  hull.position.set(14, -3, -6);
+  scene.add(hull);
+  const endGeo = new THREE.SphereGeometry(1.2, 8, 6);
+  endGeo.scale(1, 1, 0.6);
+  const end1 = new THREE.Mesh(endGeo, wreckMat);
+  end1.position.set(14+4, -3, -6);
+  scene.add(end1);
+
+  // Lumière verte sur l'épave
+  const wreckLight = new THREE.PointLight(0x00ff88, 1.5, 8);
+  wreckLight.position.set(14, -2, -6);
+  scene.add(wreckLight);
+}
+
+/* ═══════════════════════════════════════
+   HUD SVG PÉRI
+═══════════════════════════════════════ */
+function buildHUD() {
+  const W = window.innerWidth, H = window.innerHeight;
+  const cx = W/2, cy = H/2;
+  const R = Math.min(W, H)*0.42;
+
+  // Masque hublot (découpe circulaire dans du noir)
+  const pMask = document.getElementById('porthole-mask');
+  pMask.innerHTML = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <mask id="hole">
+        <rect width="${W}" height="${H}" fill="white"/>
+        <circle cx="${cx}" cy="${cy}" r="${R}" fill="black"/>
+      </mask>
+    </defs>
+    <rect width="${W}" height="${H}" fill="#000d12" mask="url(#hole)"/>
+    <circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="${C}0.6)" stroke-width="2"/>
+    <circle cx="${cx}" cy="${cy}" r="${R+8}" fill="none" stroke="${C}0.15)" stroke-width="1"/>
+    <circle cx="${cx}" cy="${cy}" r="${R-8}" fill="none" stroke="${C}0.08)" stroke-width="1"/>
+    <!-- Vis de hublot -->
+    ${[0,90,180,270].map(a=>{
+      const rx = cx + (R+4)*Math.cos(a*Math.PI/180);
+      const ry = cy + (R+4)*Math.sin(a*Math.PI/180);
+      return `<circle cx="${rx.toFixed(1)}" cy="${ry.toFixed(1)}" r="5" fill="none" stroke="${C}0.4)" stroke-width="1.5"/>
+              <line x1="${(rx-3).toFixed(1)}" y1="${ry.toFixed(1)}" x2="${(rx+3).toFixed(1)}" y2="${ry.toFixed(1)}" stroke="${C}0.4)" stroke-width="1"/>`;
+    }).join('')}
+  </svg>`;
+
+  // HUD interne
+  const hud = document.getElementById('hud');
+  const ticksMinor = [];
+  for (let i = 0; i < 72; i++) {
+    const a = i*5; const len = (i%18===0)?14:(i%9===0)?9:5;
+    const r1 = R-2, r2 = R-2-len;
+    const rad = a*Math.PI/180;
+    const x1 = cx+r1*Math.cos(rad-Math.PI/2), y1 = cy+r1*Math.sin(rad-Math.PI/2);
+    const x2 = cx+r2*Math.cos(rad-Math.PI/2), y2 = cy+r2*Math.sin(rad-Math.PI/2);
+    const op = (i%18===0)?0.7:(i%9===0)?0.4:0.2;
+    ticksMinor.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${C}${op})" stroke-width="${i%9===0?1.5:0.8}"/>`);
+  }
+
+  // Labels cardinaux fixes
+  const dirs = [{a:0,t:'N'},{a:90,t:'E'},{a:180,t:'S'},{a:270,t:'O'}];
+  const cardLabels = dirs.map(d=>{
+    const rad = d.a*Math.PI/180;
+    const rx = cx+(R-26)*Math.cos(rad-Math.PI/2), ry = cy+(R-26)*Math.sin(rad-Math.PI/2);
+    return `<text x="${rx.toFixed(1)}" y="${(ry+4).toFixed(1)}" text-anchor="middle" font-family="'Courier New',monospace" font-size="11" letter-spacing="1" fill="${C}0.6)">${d.t}</text>`;
+  }).join('');
+
+  // Réticule central
+  const reticle = `
+    <line x1="${cx-18}" y1="${cy}" x2="${cx-6}" y2="${cy}" stroke="${C}0.7)" stroke-width="1"/>
+    <line x1="${cx+6}" y1="${cy}" x2="${cx+18}" y2="${cy}" stroke="${C}0.7)" stroke-width="1"/>
+    <line x1="${cx}" y1="${cy-18}" x2="${cx}" y2="${cy-6}" stroke="${C}0.7)" stroke-width="1"/>
+    <line x1="${cx}" y1="${cy+6}" x2="${cx}" y2="${cy+18}" stroke="${C}0.7)" stroke-width="1"/>
+    <circle cx="${cx}" cy="${cy}" r="2" fill="${C}0.8)"/>
+    <circle cx="${cx}" cy="${cy}" r="22" fill="none" stroke="${C}0.15)" stroke-width="1"/>
+  `;
+
+  // Indicateur de cap (triangle en haut du cercle)
+  const capIndicator = `<polygon points="${cx},${cy-R+2} ${(cx-6).toFixed(1)},${(cy-R+12).toFixed(1)} ${(cx+6).toFixed(1)},${(cy-R+12).toFixed(1)}" fill="${C}0.8)"/>`;
+
+  // Textes UI
+  const ui = `
+    <text x="${(cx-R+12).toFixed(1)}" y="${(cy-R/2).toFixed(1)}" font-family="'Courier New',monospace" font-size="9" letter-spacing="2" fill="${C}0.35)">PÉRI·SCOPE</text>
+    <text id="hud-depth" x="${(cx+R-12).toFixed(1)}" y="${(cy-R/2).toFixed(1)}" font-family="'Courier New',monospace" font-size="9" letter-spacing="1" text-anchor="end" fill="${C}0.35)">−45 m</text>
+    <text id="hud-bearing" x="${cx}" y="${(cy+R-22).toFixed(1)}" font-family="'Courier New',monospace" font-size="11" letter-spacing="2" text-anchor="middle" fill="${C}0.7)">CAP 000°</text>
+    <text id="hud-gyro" x="${(cx-R+12).toFixed(1)}" y="${(cy+R-22).toFixed(1)}" font-family="'Courier New',monospace" font-size="8" letter-spacing="1" fill="${C}0.3)">GYRO —</text>
+    <text x="${(cx+R-12).toFixed(1)}" y="${(cy+R-22).toFixed(1)}" font-family="'Courier New',monospace" font-size="8" letter-spacing="1" text-anchor="end" fill="${C}0.25)">360° HORIZ</text>
+  `;
+
+  hud.innerHTML = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    ${ticksMinor.join('')}
+    ${cardLabels}
+    ${reticle}
+    ${capIndicator}
+    ${ui}
+  </svg>`;
+}
+
+/* ═══════════════════════════════════════
+   ANIMATION
+═══════════════════════════════════════ */
+function animate() {
+  requestAnimationFrame(animate);
+  animT += 0.008;
+
+  // Lerp yaw uniquement — pitch = 0 fixe
+  currentYaw += (targetYaw - currentYaw) * LERP;
+
+  // Caméra : rotation Y seulement, horizon verrouillé
+  camera.rotation.set(0, currentYaw, 0, 'YXZ');
+
+  // Animer bulles
+  scene.userData.bubbles.forEach(b => {
+    b.position.y += b.userData.speed;
+    b.position.x += b.userData.drift;
+    if (b.position.y > 6) b.position.y = -5;
+  });
+
+  // Animer poissons
+  scene.userData.fish.forEach(f => {
+    f.userData.angle += f.userData.speed;
+    f.position.x = Math.cos(f.userData.angle) * f.userData.radius;
+    f.position.z = Math.sin(f.userData.angle) * f.userData.radius;
+    f.position.y = f.userData.yOffset + Math.sin(animT*2 + f.userData.yWave) * 0.3;
+    f.rotation.y = -f.userData.angle + Math.PI/2;
+  });
+
+  // Update HUD
+  const bearingDeg = ((-currentYaw * 180 / Math.PI) % 360 + 360) % 360;
+  const b = document.getElementById('hud-bearing');
+  if (b) b.textContent = `CAP ${String(Math.round(bearingDeg)).padStart(3,'0')}°`;
+
+  renderer.render(scene, camera);
+}
+
+/* ═══════════════════════════════════════
+   GYROSCOPE — MÉTHODE 1 : rotationRate (DeviceMotion)
+   Intégration angulaire pure — pas de magnétomètre, zéro saut
+═══════════════════════════════════════ */
+function handleMotion(e) {
+  const rr = e.rotationRate;
+  if (!rr || rr.alpha === null) return;
+
+  const now = performance.now();
+  if (lastGyroTime === null) { lastGyroTime = now; return; }
+  const dt = Math.min((now - lastGyroTime) / 1000, 0.05); // cap à 50ms
+  lastGyroTime = now;
+
+  // rotationRate.alpha = rotation autour de l'axe Z du téléphone (vertical tenu à la main)
+  // En portrait : alpha correspond au yaw. Signe inversé car on tourne la scène.
+  // On intègre : Δangle = vitesse_angulaire × dt
+  const degPerSec = rr.alpha; // °/s
+  targetYaw -= (degPerSec * dt) * (Math.PI / 180);
+
+  setGyroActive('rotationRate');
+}
+
+/* ═══════════════════════════════════════
+   GYROSCOPE — MÉTHODE 2 : alpha absolu (DeviceOrientation)
+   Fallback si DeviceMotion absent ou sans rotationRate
+═══════════════════════════════════════ */
+function handleOrientation(e) {
+  // Ne pas utiliser si rotationRate déjà actif
+  if (gyroMode === 'rotationRate') return;
+  if (e.alpha === null || e.alpha === undefined) return;
+
+  // Sur iOS : webkitCompassHeading donne le cap boussole absolu (0–360)
+  // C'est plus stable qu'alpha qui dépend de l'orientation initiale
+  let heading;
+  if (e.webkitCompassHeading !== undefined) {
+    heading = e.webkitCompassHeading; // iOS, boussole réelle
+  } else {
+    heading = (360 - e.alpha) % 360; // Android: alpha est sens antihoraire
+  }
+
+  if (alphaOffset === null) {
+    alphaOffset = heading;
+  }
+
+  let delta = heading - alphaOffset;
+  if (delta > 180) delta -= 360;
+  if (delta < -180) delta += 360;
+
+  targetYaw = delta * Math.PI / 180;
+
+  setGyroActive('alpha');
+}
+
+function setGyroActive(mode) {
+  if (gyroActive && gyroMode === 'rotationRate') return; // priorité absolue
+  gyroActive = true;
+  gyroMode = mode;
+  const g = document.getElementById('hud-gyro');
+  if (g) g.textContent = mode === 'rotationRate' ? 'GYRO ● RATE' : 'GYRO ● ABS';
+  document.getElementById('recal-btn').style.display = 'block';
+}
+
+function recalibrate() {
+  // Reset pour le mode alpha absolu
+  alphaOffset = null;
+  // Reset pour le mode intégration : on recentre simplement
+  if (gyroMode === 'rotationRate') {
+    targetYaw = 0;
+    currentYaw = 0;
+  }
+}
+
+/* ═══════════════════════════════════════
+   TOUCH FALLBACK (si pas de gyro)
+═══════════════════════════════════════ */
+function initTouch() {
+  document.addEventListener('touchstart', e => {
+    if (gyroActive) return;
+    isDragging = true;
+    touchStartX = e.touches[0].clientX;
+    e.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener('touchmove', e => {
+    if (!isDragging || gyroActive) return;
+    const dx = e.touches[0].clientX - touchStartX;
+    targetYaw -= dx * 0.004;
+    touchStartX = e.touches[0].clientX;
+    e.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener('touchend', () => { isDragging = false; });
+}
+
+/* ═══════════════════════════════════════
+   INIT THREE.JS
+═══════════════════════════════════════ */
+function initThree() {
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.insertBefore(renderer.domElement, document.body.firstChild);
+
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 80);
+  camera.position.set(0, 0, 0);
+
+  buildScene();
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    buildHUD();
+  });
+
+  buildHUD();
+  initTouch();
+  animate();
+}
+
+/* ═══════════════════════════════════════
+   DÉMARRAGE — demande les deux permissions
+═══════════════════════════════════════ */
+async function startApp() {
+  document.getElementById('overlay').style.display = 'none';
+  initThree();
+
+  const needsPermission = typeof DeviceMotionEvent !== 'undefined' &&
+                          typeof DeviceMotionEvent.requestPermission === 'function';
+
+  if (needsPermission) {
+    // iOS 13+ : demande unique couvre Motion ET Orientation
+    try {
+      const perm = await DeviceMotionEvent.requestPermission();
+      if (perm === 'granted') {
+        window.addEventListener('devicemotion', handleMotion, true);
+        window.addEventListener('deviceorientation', handleOrientation, true);
+      } else {
+        showDebug('Permission refusée — glisser pour pivoter');
+      }
+    } catch(err) {
+      showDebug('Erreur permission: ' + err.message);
+    }
+  } else {
+    // Android / desktop : pas de permission nécessaire
+    window.addEventListener('devicemotion', handleMotion, true);
+    window.addEventListener('deviceorientation', handleOrientation, true);
+  }
+}
+
+function showDebug(msg) {
+  let d = document.getElementById('debug-msg');
+  if (!d) {
+    d = document.createElement('div');
+    d.id = 'debug-msg';
+    d.style.cssText = 'position:fixed;bottom:70px;left:50%;transform:translateX(-50%);font-family:monospace;font-size:10px;color:rgba(140,230,200,0.5);letter-spacing:.1em;z-index:20;text-align:center;';
+    document.body.appendChild(d);
+  }
+  d.textContent = msg;
+}
+
+window.addEventListener('orientationchange', () => { alphaOffset = null; lastGyroTime = null; });
+</script>
+</body>
+</html>
