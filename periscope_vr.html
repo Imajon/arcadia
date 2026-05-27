@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>PÉRI·SCOPE VR</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body {
+  width:100%; height:100%;
+  background:#000;
+  overflow:hidden;
+  /* Force landscape */
+  touch-action: none;
+}
+canvas {
+  display:block;
+  position:fixed; inset:0;
+  width:100% !important;
+  height:100% !important;
+}
+
+/* ── SÉPARATEUR CENTRAL ── */
+#separator {
+  position:fixed;
+  top:0; bottom:0;
+  left:50%; width:4px;
+  transform:translateX(-50%);
+  background:#000;
+  z-index:8;
+  pointer-events:none;
+}
+
+/* ── MASQUES HUBLOTS (un par œil) ── */
+#masks {
+  position:fixed; inset:0;
+  pointer-events:none; z-index:4;
+}
+#masks svg { width:100%; height:100%; }
+
+/* ── SCANLINES ── */
+#scanlines {
+  position:fixed; inset:0;
+  pointer-events:none; z-index:6;
+  background: repeating-linear-gradient(0deg,
+    transparent, transparent 3px,
+    rgba(0,0,0,0.05) 3px, rgba(0,0,0,0.05) 4px);
+}
+
+/* ── HUD léger (un par côté) ── */
+#hud {
+  position:fixed; inset:0;
+  pointer-events:none; z-index:7;
+}
+#hud svg { width:100%; height:100%; }
+
+/* ── OVERLAY ── */
+#overlay {
+  position:fixed; inset:0;
+  background:#000d12;
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  z-index:100; gap:22px; padding:30px;
+  text-align:center;
+}
+#overlay-sub {
+  font:9px/1 'Courier New',monospace;
+  letter-spacing:.35em; color:rgba(100,200,180,.45);
+  text-transform:uppercase;
+}
+#overlay h1 {
+  font:normal 20px/1.5 'Courier New',monospace;
+  letter-spacing:.4em; color:rgba(140,230,200,1);
+}
+#overlay p {
+  font:12px/1.9 'Courier New',monospace;
+  letter-spacing:.08em; color:rgba(100,200,180,.5);
+}
+#start-btn {
+  font:11px/1 'Courier New',monospace;
+  letter-spacing:.35em; text-transform:uppercase;
+  background:transparent;
+  border:1px solid rgba(140,230,200,.5);
+  color:rgba(140,230,200,.9);
+  padding:16px 36px; cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+}
+#start-btn:active { background:rgba(140,230,200,.08); }
+
+/* ── RECALIBRER ── */
+#recal-btn {
+  position:fixed; bottom:16px; left:50%;
+  transform:translateX(-50%);
+  z-index:20;
+  font:9px/1 'Courier New',monospace;
+  letter-spacing:.2em; text-transform:uppercase;
+  background:transparent;
+  border:1px solid rgba(140,230,200,.2);
+  color:rgba(140,230,200,.35);
+  padding:8px 18px; cursor:pointer;
+  display:none;
+  -webkit-tap-highlight-color:transparent;
+}
+
+/* ── ROTATION LANDSCAPE ── */
+#rotate-hint {
+  position:fixed; inset:0;
+  background:#000d12;
+  display:none;
+  flex-direction:column; align-items:center; justify-content:center;
+  gap:16px; z-index:90;
+}
+#rotate-hint span {
+  font:40px/1 'Courier New',monospace;
+  color:rgba(140,230,200,.6);
+}
+#rotate-hint p {
+  font:11px/1.6 'Courier New',monospace;
+  letter-spacing:.15em; color:rgba(140,230,200,.4);
+  text-align:center;
+}
+</style>
+</head>
+<body>
+
+<div id="overlay">
+  <div id="overlay-sub">Classe Kilo · Profondeur 45 m · Mode VR</div>
+  <h1>PÉRI·SCOPE</h1>
+  <p>Placez le téléphone en mode paysage<br>dans votre casque VR.<br>Tournez votre tête pour observer à 360°.</p>
+  <button id="start-btn" onclick="startApp()">IMMERGER</button>
+</div>
+
+<div id="rotate-hint">
+  <span>↻</span>
+  <p>TOURNEZ LE TÉLÉPHONE<br>EN MODE PAYSAGE</p>
+</div>
+
+<div id="separator"></div>
+<div id="masks"></div>
+<div id="scanlines"></div>
+<div id="hud"></div>
+<button id="recal-btn" onclick="recalibrate()">↺ RECALER</button>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* ══════════════════════════════════════════════
+   ÉTAT GLOBAL
+══════════════════════════════════════════════ */
+let renderer, scene;
+let camL, camR;           // caméras stéréo
+let currentYaw = 0, targetYaw = 0;
+let currentPitch = 0, targetPitch = 0;
+let alphaOffset = null;
+let gyroActive = false, gyroMode = 'none';
+let lastGyroTime = null;
+let animT = 0;
+let appStarted = false;
+const LERP = 0.12;
+const IPD = 0.032;        // demi-écart interpupillaire en unités scène (~6.4cm)
+const C = 'rgba(140,230,200,';
+
+/* ══════════════════════════════════════════════
+   SCÈNE SOUS-MARINE
+══════════════════════════════════════════════ */
+function buildScene() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x00141e);
+  scene.fog = new THREE.FogExp2(0x00141e, 0.020);
+
+  scene.add(new THREE.AmbientLight(0x0a2030, 1.2));
+
+  const topLight = new THREE.DirectionalLight(0x0055aa, 0.8);
+  topLight.position.set(0, 20, 0);
+  scene.add(topLight);
+
+  const c1 = new THREE.PointLight(0x0077cc, 3, 35);
+  c1.position.set(0, 8, 0); scene.add(c1);
+  const c2 = new THREE.PointLight(0x003366, 2, 25);
+  c2.position.set(-12, 5, -12); scene.add(c2);
+
+  // SOL
+  const sandGeo = new THREE.PlaneGeometry(100, 100, 40, 40);
+  const pos = sandGeo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    pos.setY(i, Math.sin(pos.getX(i)*.3)*.3 + Math.cos(pos.getZ(i)*.25)*.25);
+  }
+  sandGeo.computeVertexNormals();
+  const sand = new THREE.Mesh(sandGeo,
+    new THREE.MeshStandardMaterial({ color:0x0a2818, roughness:1 }));
+  sand.rotation.x = -Math.PI/2; sand.position.y = -4; scene.add(sand);
+  scene.add(Object.assign(new THREE.GridHelper(80,40,0x0a3020,0x061810), {position:{x:0,y:-3.95,z:0}}));
+
+  // CORAUX
+  const rockMat = new THREE.MeshStandardMaterial({color:0x0d2a20,roughness:.8,metalness:.1,emissive:0x001a10,emissiveIntensity:.3});
+  [[-5,-7],[5,-7],[-8,3],[8,3],[0,-12],[12,0],[-12,0],[0,12],[-3,5],[3,-4],[-7,-2],[7,2],[2,8],[-2,-8],[10,7],[-10,-7]].forEach(([x,z],i)=>{
+    const h=[4,5,3,5,6,3,4,4,7,2.5,3.5,4,3,5,3,4][i];
+    const w=.5+Math.random()*.8;
+    const cyl=new THREE.Mesh(new THREE.CylinderGeometry(w*.4,w*.7,h,7),rockMat);
+    cyl.position.set(x,-4+h/2,z); cyl.rotation.y=Math.random()*Math.PI; scene.add(cyl);
+    const top=new THREE.Mesh(new THREE.SphereGeometry(w*.55,8,6),rockMat);
+    top.position.set(x,-4+h+w*.2,z); scene.add(top);
+  });
+
+  // BULLES
+  const bMat = new THREE.MeshBasicMaterial({color:0x44aacc,transparent:true,opacity:.3});
+  const bubbles = [];
+  for(let i=0;i<100;i++){
+    const b=new THREE.Mesh(new THREE.SphereGeometry(.06,5,5),bMat);
+    b.position.set((Math.random()-.5)*30,(Math.random()-.5)*8,(Math.random()-.5)*30);
+    b.userData.speed=.006+Math.random()*.014;
+    b.userData.drift=(Math.random()-.5)*.003;
+    scene.add(b); bubbles.push(b);
+  }
+  scene.userData.bubbles = bubbles;
+
+  // PLANCTON
+  const plankGeo = new THREE.BufferGeometry();
+  const pp = new Float32Array(600*3);
+  for(let i=0;i<600;i++){pp[i*3]=(Math.random()-.5)*50;pp[i*3+1]=(Math.random()-.5)*10;pp[i*3+2]=(Math.random()-.5)*50;}
+  plankGeo.setAttribute('position',new THREE.BufferAttribute(pp,3));
+  scene.add(new THREE.Points(plankGeo,new THREE.PointsMaterial({color:0x33ffaa,size:.06,transparent:true,opacity:.5})));
+
+  // POISSONS
+  const fMat = new THREE.MeshStandardMaterial({color:0x115533,emissive:0x002211,emissiveIntensity:.5,roughness:.4});
+  const fish=[];
+  for(let i=0;i<16;i++){
+    const geo=new THREE.SphereGeometry(1,8,5); geo.scale(.4,.18,.12);
+    const f=new THREE.Mesh(geo,fMat);
+    const a=Math.random()*Math.PI*2, r=4+Math.random()*8;
+    f.position.set(Math.cos(a)*r,(Math.random()-.5)*3,Math.sin(a)*r);
+    f.userData={angle:a,radius:r,speed:.003+Math.random()*.005,yOffset:(Math.random()-.5)*3,yWave:Math.random()*Math.PI*2};
+    scene.add(f); fish.push(f);
+  }
+  scene.userData.fish = fish;
+
+  // RAYONS DE LUMIÈRE
+  const rayGeo=new THREE.CylinderGeometry(.1,2.5,12,12,1,true);
+  const rayMat=new THREE.MeshBasicMaterial({color:0x0066aa,transparent:true,opacity:.04,side:THREE.DoubleSide});
+  [[2,3,-3],[-4,3,4]].forEach(([x,y,z])=>{
+    const r=new THREE.Mesh(rayGeo,rayMat); r.position.set(x,y,z); scene.add(r);
+  });
+
+  // ÉPAVE
+  const wMat=new THREE.MeshStandardMaterial({color:0x0a1f18,roughness:1,metalness:.6,emissive:0x001008,emissiveIntensity:.2});
+  const hull=new THREE.Mesh(new THREE.CylinderGeometry(1.2,1.5,8,10),wMat);
+  hull.rotation.z=Math.PI/2; hull.rotation.y=.6; hull.position.set(14,-3,-6); scene.add(hull);
+  const end=new THREE.Mesh(new THREE.SphereGeometry(1.2,8,6),wMat);
+  end.position.set(18,-3,-6); scene.add(end);
+  const wl=new THREE.PointLight(0x00ff88,1.5,8); wl.position.set(14,-2,-6); scene.add(wl);
+}
+
+/* ══════════════════════════════════════════════
+   MASQUES + HUD SVG STÉRÉO
+══════════════════════════════════════════════ */
+function buildHUD() {
+  const W = window.innerWidth, H = window.innerHeight;
+  const half = W / 2;
+  // Hublot dans chaque moitié — légèrement ovale, remplit max la hauteur
+  const ry = H * 0.44;               // rayon vertical
+  const rx = Math.min(half * 0.44, ry * 1.2); // rayon horizontal
+  const cxL = half / 2, cxR = half + half / 2, cy = H / 2;
+
+  // ── MASQUES ──
+  document.getElementById('masks').innerHTML = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <mask id="mL">
+        <rect x="0" y="0" width="${half}" height="${H}" fill="white"/>
+        <ellipse cx="${cxL}" cy="${cy}" rx="${rx}" ry="${ry}" fill="black"/>
+      </mask>
+      <mask id="mR">
+        <rect x="${half}" y="0" width="${half}" height="${H}" fill="white"/>
+        <ellipse cx="${cxR}" cy="${cy}" rx="${rx}" ry="${ry}" fill="black"/>
+      </mask>
+    </defs>
+    <!-- Zones noires hors hublot -->
+    <rect x="0" y="0" width="${half}" height="${H}" fill="#000d12" mask="url(#mL)"/>
+    <rect x="${half}" y="0" width="${half}" height="${H}" fill="#000d12" mask="url(#mR)"/>
+    <!-- Bords hublots -->
+    <ellipse cx="${cxL}" cy="${cy}" rx="${rx}" ry="${ry}" fill="none" stroke="${C}.55)" stroke-width="2.5"/>
+    <ellipse cx="${cxL}" cy="${cy}" rx="${rx+7}" ry="${ry+7}" fill="none" stroke="${C}.12)" stroke-width="1"/>
+    <ellipse cx="${cxR}" cy="${cy}" rx="${rx}" ry="${ry}" fill="none" stroke="${C}.55)" stroke-width="2.5"/>
+    <ellipse cx="${cxR}" cy="${cy}" rx="${rx+7}" ry="${ry+7}" fill="none" stroke="${C}.12)" stroke-width="1"/>
+    <!-- Vis aux 4 coins de chaque hublot -->
+    ${[cxL,cxR].flatMap(cx=>[0,90,180,270].map(a=>{
+      const vx=cx+(rx+4)*Math.cos(a*Math.PI/180), vy=cy+(ry+4)*Math.sin(a*Math.PI/180);
+      return `<circle cx="${vx.toFixed(1)}" cy="${vy.toFixed(1)}" r="5" fill="none" stroke="${C}.35)" stroke-width="1.5"/>
+              <line x1="${(vx-3).toFixed(1)}" y1="${vy.toFixed(1)}" x2="${(vx+3).toFixed(1)}" y2="${vy.toFixed(1)}" stroke="${C}.35)" stroke-width="1"/>`;
+    })).join('')}
+    <!-- Vignettes internes douces -->
+    <defs>
+      <radialGradient id="vigL" cx="${cxL/W*100}%" cy="50%" r="50%">
+        <stop offset="35%" stop-color="transparent"/>
+        <stop offset="100%" stop-color="rgba(0,8,12,.7)"/>
+      </radialGradient>
+      <radialGradient id="vigR" cx="${cxR/W*100}%" cy="50%" r="50%">
+        <stop offset="35%" stop-color="transparent"/>
+        <stop offset="100%" stop-color="rgba(0,8,12,.7)"/>
+      </radialGradient>
+    </defs>
+    <ellipse cx="${cxL}" cy="${cy}" rx="${rx}" ry="${ry}" fill="url(#vigL)"/>
+    <ellipse cx="${cxR}" cy="${cy}" rx="${rx}" ry="${ry}" fill="url(#vigR)"/>
+  </svg>`;
+
+  // ── HUD ──
+  const crosshair = (cx, cy) => `
+    <line x1="${cx-16}" y1="${cy}" x2="${cx-5}" y2="${cy}" stroke="${C}.65)" stroke-width="1"/>
+    <line x1="${cx+5}" y1="${cy}" x2="${cx+16}" y2="${cy}" stroke="${C}.65)" stroke-width="1"/>
+    <line x1="${cx}" y1="${cy-16}" x2="${cx}" y2="${cy-5}" stroke="${C}.65)" stroke-width="1"/>
+    <line x1="${cx}" y1="${cy+5}" x2="${cx}" y2="${cy+16}" stroke="${C}.65)" stroke-width="1"/>
+    <circle cx="${cx}" cy="${cy}" r="2.5" fill="${C}.8)"/>
+    <circle cx="${cx}" cy="${cy}" r="20" fill="none" stroke="${C}.12)" stroke-width="1"/>`;
+
+  // Ticks de cap sur bord hublot
+  const capTicks = (cx) => {
+    let t='';
+    for(let i=0;i<36;i++){
+      const a=i*10, len=(i%9===0)?10:(i%3===0)?6:3;
+      const rad=(a-90)*Math.PI/180;
+      const r1=ry-2, r2=ry-2-len;
+      const x1=cx+rx/ry*r1*Math.cos(rad), y1=cy+r1*Math.sin(rad);
+      const x2=cx+rx/ry*r2*Math.cos(rad), y2=cy+r2*Math.sin(rad);
+      const op=(i%9===0)?.6:(i%3===0)?.3:.15;
+      t+=`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${C}${op})" stroke-width="${i%9===0?1.5:.7}"/>`;
+    }
+    return t;
+  };
+
+  document.getElementById('hud').innerHTML = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    ${capTicks(cxL)} ${capTicks(cxR)}
+    ${crosshair(cxL, cy)} ${crosshair(cxR, cy)}
+    <!-- Indicateurs cap -->
+    <text id="hud-cap-l" x="${cxL}" y="${cy+ry-18}" text-anchor="middle"
+      font-family="'Courier New',monospace" font-size="10" letter-spacing="2" fill="${C}.6)">CAP 000°</text>
+    <text id="hud-cap-r" x="${cxR}" y="${cy+ry-18}" text-anchor="middle"
+      font-family="'Courier New',monospace" font-size="10" letter-spacing="2" fill="${C}.6)">CAP 000°</text>
+    <!-- Profondeur -->
+    <text x="${cxL-rx+10}" y="${cy-ry+22}" font-family="'Courier New',monospace" font-size="9" letter-spacing="1" fill="${C}.3)">−45 m</text>
+    <text x="${cxR-rx+10}" y="${cy-ry+22}" font-family="'Courier New',monospace" font-size="9" letter-spacing="1" fill="${C}.3)">−45 m</text>
+    <!-- Œil -->
+    <text x="${cxL+rx-10}" y="${cy-ry+22}" text-anchor="end" font-family="'Courier New',monospace" font-size="9" letter-spacing="1" fill="${C}.25)">OG</text>
+    <text x="${cxR+rx-10}" y="${cy-ry+22}" text-anchor="end" font-family="'Courier New',monospace" font-size="9" letter-spacing="1" fill="${C}.25)">OD</text>
+    <!-- Gyro status -->
+    <text id="hud-gyro" x="${W/2}" y="${H-8}" text-anchor="middle" font-family="'Courier New',monospace" font-size="8" letter-spacing="2" fill="${C}.25)">GYRO —</text>
+  </svg>`;
+}
+
+/* ══════════════════════════════════════════════
+   RENDU STÉRÉO — scissor gauche / droite
+══════════════════════════════════════════════ */
+function renderStereo() {
+  const W = renderer.domElement.width;
+  const H = renderer.domElement.height;
+  const half = Math.floor(W / 2);
+
+  renderer.setScissorTest(true);
+
+  // ── ŒIL GAUCHE ──
+  renderer.setViewport(0, 0, half, H);
+  renderer.setScissor(0, 0, half, H);
+  camL.rotation.set(0, currentYaw, 0, 'YXZ');
+  renderer.render(scene, camL);
+
+  // ── ŒIL DROIT ──
+  renderer.setViewport(half, 0, half, H);
+  renderer.setScissor(half, 0, half, H);
+  camR.rotation.set(0, currentYaw, 0, 'YXZ');
+  renderer.render(scene, camR);
+
+  renderer.setScissorTest(false);
+}
+
+/* ══════════════════════════════════════════════
+   ANIMATION
+══════════════════════════════════════════════ */
+function animate() {
+  requestAnimationFrame(animate);
+  animT += 0.008;
+
+  currentYaw += (targetYaw - currentYaw) * LERP;
+
+  // Bulles
+  scene.userData.bubbles.forEach(b => {
+    b.position.y += b.userData.speed;
+    b.position.x += b.userData.drift;
+    if (b.position.y > 6) b.position.y = -5;
+  });
+
+  // Poissons
+  scene.userData.fish.forEach(f => {
+    f.userData.angle += f.userData.speed;
+    f.position.x = Math.cos(f.userData.angle) * f.userData.radius;
+    f.position.z = Math.sin(f.userData.angle) * f.userData.radius;
+    f.position.y = f.userData.yOffset + Math.sin(animT*2 + f.userData.yWave) * .3;
+    f.rotation.y = -f.userData.angle + Math.PI/2;
+  });
+
+  // HUD cap
+  const deg = ((-currentYaw * 180 / Math.PI) % 360 + 360) % 360;
+  const capStr = `CAP ${String(Math.round(deg)).padStart(3,'0')}°`;
+  const cl = document.getElementById('hud-cap-l');
+  const cr = document.getElementById('hud-cap-r');
+  if (cl) cl.textContent = capStr;
+  if (cr) cr.textContent = capStr;
+
+  renderStereo();
+}
+
+/* ══════════════════════════════════════════════
+   GYROSCOPE
+══════════════════════════════════════════════ */
+function handleMotion(e) {
+  const rr = e.rotationRate;
+  if (!rr || rr.beta === null) return;
+  const now = performance.now();
+  if (lastGyroTime === null) { lastGyroTime = now; return; }
+  const dt = Math.min((now - lastGyroTime) / 1000, 0.05);
+  lastGyroTime = now;
+
+  // En landscape, l'axe vertical physique du téléphone = rotationRate.beta
+  // (même axe qu'en portrait — beta = rotation autour de l'axe Y du device)
+  targetYaw -= (rr.beta * dt) * (Math.PI / 180);
+
+  setGyroActive('rate');
+}
+
+function handleOrientation(e) {
+  if (gyroMode === 'rate') return;
+  if (e.alpha === null) return;
+  const heading = e.webkitCompassHeading !== undefined
+    ? e.webkitCompassHeading
+    : (360 - e.alpha) % 360;
+  if (alphaOffset === null) alphaOffset = heading;
+  let d = heading - alphaOffset;
+  if (d > 180) d -= 360; if (d < -180) d += 360;
+  targetYaw = d * Math.PI / 180;
+  setGyroActive('abs');
+}
+
+function setGyroActive(mode) {
+  if (gyroActive && gyroMode === 'rate') return;
+  gyroActive = true; gyroMode = mode;
+  const g = document.getElementById('hud-gyro');
+  if (g) g.textContent = mode === 'rate' ? 'GYRO ● RATE' : 'GYRO ● ABS';
+  document.getElementById('recal-btn').style.display = 'block';
+}
+
+function recalibrate() {
+  alphaOffset = null;
+  if (gyroMode === 'rate') { targetYaw = 0; currentYaw = 0; }
+}
+
+/* ══════════════════════════════════════════════
+   INIT THREE.JS
+══════════════════════════════════════════════ */
+function initThree() {
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.insertBefore(renderer.domElement, document.body.firstChild);
+
+  const aspect = (window.innerWidth / 2) / window.innerHeight;
+
+  // Deux caméras décalées latéralement (IPD)
+  camL = new THREE.PerspectiveCamera(90, aspect, 0.05, 80);
+  camL.position.set(-IPD, 0, 0);
+
+  camR = new THREE.PerspectiveCamera(90, aspect, 0.05, 80);
+  camR.position.set(IPD, 0, 0);
+
+  buildScene();
+  buildHUD();
+
+  window.addEventListener('resize', () => {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    const a = (window.innerWidth / 2) / window.innerHeight;
+    camL.aspect = a; camL.updateProjectionMatrix();
+    camR.aspect = a; camR.updateProjectionMatrix();
+    buildHUD();
+  });
+
+  animate();
+}
+
+/* ══════════════════════════════════════════════
+   HINT LANDSCAPE
+══════════════════════════════════════════════ */
+function checkOrientation() {
+  const hint = document.getElementById('rotate-hint');
+  if (!appStarted) return;
+  const isPortrait = window.innerHeight > window.innerWidth;
+  hint.style.display = isPortrait ? 'flex' : 'none';
+}
+window.addEventListener('resize', checkOrientation);
+
+/* ══════════════════════════════════════════════
+   DÉMARRAGE
+══════════════════════════════════════════════ */
+async function startApp() {
+  document.getElementById('overlay').style.display = 'none';
+  appStarted = true;
+  initThree();
+  checkOrientation();
+
+  const needsPerm = typeof DeviceMotionEvent !== 'undefined' &&
+                    typeof DeviceMotionEvent.requestPermission === 'function';
+  if (needsPerm) {
+    try {
+      const p = await DeviceMotionEvent.requestPermission();
+      if (p === 'granted') {
+        window.addEventListener('devicemotion', handleMotion, true);
+        window.addEventListener('deviceorientation', handleOrientation, true);
+      }
+    } catch(e) {}
+  } else {
+    window.addEventListener('devicemotion', handleMotion, true);
+    window.addEventListener('deviceorientation', handleOrientation, true);
+  }
+}
+
+window.addEventListener('orientationchange', () => { alphaOffset = null; lastGyroTime = null; });
+</script>
+</body>
+</html>
